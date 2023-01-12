@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using System.Reflection;
 
 namespace Jhlgns.QueryCompiler;
 
@@ -28,6 +29,8 @@ manager.name ilike "steven*" || users not all { street like "*29" }
 // TODO(jh) Make everything as resilient as possible - case insensitive, shortcuts (if not ambiguous etc.)
 // TODO(jh) Make more efficient by using ReadOnlySpan<char> etc.
 // TODO(jh) String quotes are optional for words without whitespace on right side of binary operator
+// TODO(jh) Tests
+// TODO(jh) Benchmarks
 
 public class QueryCompiler
 {
@@ -62,6 +65,8 @@ public class QueryCompiler
     private record BlockOpen() : Token;  // TODO(jh)
     private record BlockClose() : Token;  // TODO(jh)
     private record EndOfFile() : Token;  // TODO(jh)
+
+    private record MemberInfo(PropertyInfo Property, ParameterExpression Variable);
 
     private record struct Scanner(string Input, int Position = 0)
     {
@@ -126,32 +131,78 @@ public class QueryCompiler
                 return new BinaryOperator(binOp);
             }
 
-            if (Current == '(') return new ParenthesisOpen();
-            if (Current == ')') return new ParenthesisClose();
-            if (Current == '}') return new BlockOpen();
-            if (Current == '{') return new BlockClose();
-
-            throw new NotImplementedException("Next token type is not implemented yet");
+            return Current switch
+            {
+                '(' => new ParenthesisOpen(),
+                ')' => new ParenthesisClose(),
+                '}' => new BlockOpen(),
+                '{' => new BlockClose(),
+                _ => throw new NotImplementedException("Next token type is not implemented yet"),
+            };
         }
     }
 
     public static Func<T, bool> Compile<T>(string query)
     {
-        var memberVariables = typeof(T).GetProperties()
-            .Select(x => Expression.Variable(x.PropertyType, x.Name))
-            .ToDictionary(x => x.Name!.ToLower());
+        // TODO(jh) -> record
+        var members = typeof(T).GetProperties()
+            .Select(x => new MemberInfo(x, Expression.Variable(x.PropertyType, x.Name)))
+            .ToDictionary(x => x.Property.Name.ToLower());
 
         var scanner = new Scanner(query);
-        var expression = ParseExpression(scanner, memberVariables);
+        var filterExpression = ParseExpression(scanner, members);
 
         var todoSomethingLeftOver = true;  // TODO(jh)
         if (todoSomethingLeftOver)
             throw new Exception("TODO(jh) Error message for extraneous tokens");
+
+        /*
+        record Cowabunga(int Id, string Name)
+        record SomeStruct(int A, double B, string C, Cowabunga Value)
+
+        Compile<SomeStruct>("a == 123 && C like hans* || v.id < 1000");
+
+        Should generate something like the following lambda:
+
+        (Cowabunga input) =>
+        {
+            int a;
+            double b;
+            string c;
+            Cowabunga value;
+            a = input.A;
+            b = input.B;
+            c = input.C;
+            value = input.Cowabunga;
+
+            return a == 123 && Like(c,  "hans*") || value.Id < 1000;
+        }
+        */
+
+        var inputParam = Expression.Parameter(typeof(T), "input");
+
+        var bodyExpressions = new List<Expression>();
+        bodyExpressions.AddRange(members.Values.Select(x => x.Variable));
+
+        foreach (var (_, variable) in members)
+        {
+            var inputMember = Expression.MakeMemberAccess(inputParam, variable.Property);
+            var assignment = Expression.Assign(variable.Variable, inputMember);
+            bodyExpressions.Add(assignment);
+        }
+
+        var returnExpression = Expression.Return(Expression.Label(), filterExpression, typeof(bool));  // TODO
+        bodyExpressions.Add(returnExpression);
+
+        var body = Expression.Block(bodyExpressions);
+        var lambda = Expression.Lambda<Func<T, bool>>(body, inputParam);
+
+        return lambda.Compile();
     }
 
     private static Expression ParseExpression(
         in Scanner scanner,
-        Dictionary<string, ParameterExpression> members)
+        Dictionary<string, MemberInfo> members)
     {
         var expression = ParsePrimaryExpression(scanner, members);
         switch (scanner.PopToken())
@@ -168,12 +219,12 @@ public class QueryCompiler
 
     private static Expression ParsePrimaryExpression(
         in Scanner scanner,
-        Dictionary<string, ParameterExpression> members)
+        Dictionary<string, MemberInfo> members)
     {
         switch (scanner.PopToken())
         {
             case Identifier ident:
-                return members[ident.Value.ToLower()];
+                return members[ident.Value.ToLower()].Variable;
 
             case ParenthesisOpen:
                 var expression = ParseExpression(scanner, members);
