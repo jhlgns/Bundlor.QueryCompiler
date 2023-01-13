@@ -1,5 +1,6 @@
 ﻿using System.Linq.Expressions;
 using System.Reflection;
+using static Jhlgns.QueryCompiler.TokenConstants;
 
 namespace Jhlgns.QueryCompiler;
 
@@ -32,119 +33,35 @@ manager.name ilike "steven*" || users not all { street like "*29" }
 // TODO(jh) Tests
 // TODO(jh) Benchmarks
 
+/*
+record Cowabunga(int Id, string Name)
+record SomeStruct(int A, double B, string C, Cowabunga Value)
+
+Compile<SomeStruct>("a == 123 && C like hans* || v.id < 1000");
+
+Should generate something like the following lambda:
+
+(Cowabunga input) =>
+{
+    int a;
+    double b;
+    string c;
+    Cowabunga value;
+    a = input.A;
+    b = input.B;
+    c = input.C;
+    value = input.Cowabunga;
+
+    return a == 123 && Like(c,  "hans*") || value.Id < 1000;
+}
+*/
+
 public class QueryCompiler
 {
-    private readonly record struct BinaryOperatorDefinition(string Operator, ExpressionType ExpressionType, int Precedence);  // TODO(jh)
-
-    private static readonly BinaryOperatorDefinition[] BinaryOperators = new  BinaryOperatorDefinition[]
-    {
-        // TODO(jh) Precedences
-        new("&&", ExpressionType.And, 0),
-        new("||", ExpressionType.Or, 0),
-        new("<=", ExpressionType.LessThanOrEqual, 0),
-        new("<", ExpressionType.LessThan, 0),
-        new(">=", ExpressionType.GreaterThanOrEqual, 0),
-        new(">", ExpressionType.GreaterThan, 0),
-        new("==", ExpressionType.Equal, 0),
-        new("!=", ExpressionType.NotEqual, 0),
-    };
-
-    private static readonly string[] SpecialBinaryOperators = new[] { "older", "newer", "like", "ilike", "matches" };
-    private static readonly string[] NestedQueryOperators = new[] { "any", "all" };
-
-    private abstract record Token { }  // TODO(jh) Start, end etc.
-    private record Identifier(string Value) : Token;
-    private record BinaryOperator(BinaryOperatorDefinition Definition) : Token;
-    private record SpecialBinaryOperator(string Operator) : Token;
-    private record NestedQueryOperator(string Operator) : Token;
-    private record StringLiteral(string Value) : Token;  // TODO(jh)
-    private record IntegerLiteral(long Value) : Token;
-    private record FloatingPointLiteral(double Value) : Token;  // TODO(jh)
-    private record ParenthesisOpen() : Token;  // TODO(jh)
-    private record ParenthesisClose() : Token;  // TODO(jh)
-    private record BlockOpen() : Token;  // TODO(jh)
-    private record BlockClose() : Token;  // TODO(jh)
-    private record EndOfFile() : Token;  // TODO(jh)
-
     private record MemberInfo(PropertyInfo Property, ParameterExpression Variable);
-
-    private record struct Scanner(string Input, int Position = 0)
-    {
-        private char this[int index] => index < Input.Length ? Input[index] : '\0';
-        private char Current => this[Position];
-
-        public Token PopToken()
-        {
-            while (char.IsWhiteSpace(Current))
-                ++Position;
-
-            // Identifier or special binary operator?
-            if (char.IsLetter(Current) || Current == '_')
-            {
-                var wordStart = Position;
-                while (char.IsLetter(Current) || char.IsNumber(Current) || Current == '_')
-                    ++Position;
-
-                var word = Input.Substring(wordStart, Position - wordStart);
-
-                // TODO(jh) not?
-                if (SpecialBinaryOperators.Any(x => x.Equals(word, StringComparison.OrdinalIgnoreCase)))
-                    return new SpecialBinaryOperator(word);
-
-                if (NestedQueryOperators.Any(x => x.Equals(word, StringComparison.OrdinalIgnoreCase)))
-                    return new NestedQueryOperator(word);
-
-                return new Identifier(word);
-            }
-
-            // Number? (integer or floating point)
-            if (char.IsNumber(Current))
-            {
-                var numberStart = Position;
-                while (char.IsNumber(Current))
-                    ++Position;
-
-                // TODO(jh) Floating point
-                var numberString = Input.Substring(numberStart, Position - numberStart);
-                var value = int.Parse(numberString);  // TODO(jh) Try & error message
-
-                return new IntegerLiteral(value);
-            }
-
-            // Binary operator?
-            foreach (var binOp in BinaryOperators)
-            {
-                var isMatch = true;
-                for (var i = 0; i < binOp.Operator.Length; ++i)
-                {
-                    if (binOp.Operator[i] != this[Position + i])
-                        isMatch = false;
-
-                    ++i;
-                }
-
-                if (!isMatch)
-                    continue;
-
-                Position += binOp.Operator.Length;
-
-                return new BinaryOperator(binOp);
-            }
-
-            return Current switch
-            {
-                '(' => new ParenthesisOpen(),
-                ')' => new ParenthesisClose(),
-                '}' => new BlockOpen(),
-                '{' => new BlockClose(),
-                _ => throw new NotImplementedException("Next token type is not implemented yet"),
-            };
-        }
-    }
 
     public static Func<T, bool> Compile<T>(string query)
     {
-        // TODO(jh) -> record
         var members = typeof(T).GetProperties()
             .Select(x => new MemberInfo(x, Expression.Variable(x.PropertyType, x.Name)))
             .ToDictionary(x => x.Property.Name.ToLower());
@@ -152,32 +69,12 @@ public class QueryCompiler
         var scanner = new Scanner(query);
         var filterExpression = ParseExpression(scanner, members);
 
+        //if (scanner.Position != scanner.Input.Length)
+
         var todoSomethingLeftOver = true;  // TODO(jh)
         if (todoSomethingLeftOver)
             throw new Exception("TODO(jh) Error message for extraneous tokens");
 
-        /*
-        record Cowabunga(int Id, string Name)
-        record SomeStruct(int A, double B, string C, Cowabunga Value)
-
-        Compile<SomeStruct>("a == 123 && C like hans* || v.id < 1000");
-
-        Should generate something like the following lambda:
-
-        (Cowabunga input) =>
-        {
-            int a;
-            double b;
-            string c;
-            Cowabunga value;
-            a = input.A;
-            b = input.B;
-            c = input.C;
-            value = input.Cowabunga;
-
-            return a == 123 && Like(c,  "hans*") || value.Id < 1000;
-        }
-        */
 
         var inputParam = Expression.Parameter(typeof(T), "input");
 
@@ -205,12 +102,14 @@ public class QueryCompiler
         Dictionary<string, MemberInfo> members)
     {
         var expression = ParsePrimaryExpression(scanner, members);
-        switch (scanner.PopToken())
+        var token = scanner.PopToken();
+        switch (token.Kind)
         {
             // TODO(jh) Operator precedence
-            case BinaryOperator binOp:
+            case TokenKind.BinaryOperator:
                 var right = ParseExpression(scanner, members);
-                return Expression.MakeBinary(binOp.Definition.ExpressionType, expression, right);
+                var defn = GetBinaryOperatorDefinition(token.Text);
+                return Expression.MakeBinary(defn.ExpressionType, expression, right);
 
             default:
                 return expression;
@@ -221,25 +120,26 @@ public class QueryCompiler
         in Scanner scanner,
         Dictionary<string, MemberInfo> members)
     {
-        switch (scanner.PopToken())
+        var token = scanner.PopToken();
+        switch (token.Kind)
         {
-            case Identifier ident:
-                return members[ident.Value.ToLower()].Variable;
+            case TokenKind.Identifier:
+                return members[token.Text.ToLower()].Variable;
 
-            case ParenthesisOpen:
+            case TokenKind.ParenthesisOpen:
                 var expression = ParseExpression(scanner, members);
-                if (scanner.PopToken() is not ParenthesisClose)
+                if (scanner.PopToken().Kind != TokenKind.ParenthesisClose)
                     throw new Exception("TODO(jh) scanner.Require(predicate, errorMessage)");
                 return expression;
 
-            case StringLiteral s:
-                return Expression.Constant(s.Value);
+            case TokenKind.StringLiteral:
+                return Expression.Constant(token.StringValue);
 
-            case IntegerLiteral i:
-                return Expression.Constant(i.Value);
+            case TokenKind.IntegerLiteral:
+                return Expression.Constant(token.IntValue);
 
-            case FloatingPointLiteral f:
-                return Expression.Constant(f.Value);
+            case TokenKind.FloatingPointLiteral:
+                return Expression.Constant(token.DoubleValue);
 
             // TODO(jh)
 
