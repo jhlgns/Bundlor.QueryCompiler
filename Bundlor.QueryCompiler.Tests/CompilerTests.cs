@@ -2,6 +2,9 @@
 
 namespace Bundlor.QueryCompiler.Tests;
 
+// TODO(jh) When use [Theory] and when use [Fact]?
+// It seems to me that facts are generally easier to write and read...
+
 public class CompilerTests
 {
     private record BooleanTriple(bool A, bool B, bool C = false);
@@ -169,6 +172,31 @@ public class CompilerTests
         var filter = Compile<SampleStruct>(query);
         var filterResult = filter(record);
         Assert.Equal(expectedFilterResult, filterResult);
+    }
+
+    [Fact]
+    public void Like()
+    {
+        // TODO(jh) Make it so that if the last token was a special string operator
+        // the next token gets interpreted as a string literal until the next whitespace (?)
+        var filter = Compile<SampleStruct>("first like \"*n\" || last like \"k*a*\"");
+        Assert.True(filter(new SampleStruct { FirstName = "jan" }));
+        Assert.True(filter(new SampleStruct { FirstName = "jahn" }));
+        Assert.False(filter(new SampleStruct { FirstName = "jam" }));
+        Assert.True(filter(new SampleStruct { LastName = "karl" }));
+        Assert.False(filter(new SampleStruct { LastName = "carl" }));
+        Assert.True(filter(new SampleStruct { LastName = "karateee!" }));
+    }
+
+    [Fact]
+    public void Matches()
+    {
+        var filter = Compile<SampleStruct>("first matches \"^[0-9a-z]*_\\s+(a){1,2}$\"");
+        Assert.False(filter(new SampleStruct { FirstName = "" }));
+        Assert.True(filter(new SampleStruct { FirstName = "_ a" }));
+        Assert.True(filter(new SampleStruct { FirstName = "a0b1c2_  \taa" }));
+        Assert.False(filter(new SampleStruct { FirstName = "a0b1c2_  aaa" }));
+        Assert.False(filter(new SampleStruct { FirstName = "a__ \ta" }));
     }
 
     [Fact]
