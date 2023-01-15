@@ -24,7 +24,7 @@ public class ScannerTests
         var tokens = new List<Token>();
         while (true)
         {
-            var token = scanner.PopToken();
+            var token = scanner.Pop();
             tokens.Add(token);
             if (token.Kind == TK.EndOfFile) break;
         }
@@ -40,55 +40,148 @@ public class ScannerTests
         }
     }
 
-    [Fact]
-    public void Identifiers()
-    {
-        var query = "    \n \n\t word \nCAPITAL\t\v\nMiXeD s";
-        var expectations = new TokenExpectation[]
+
+    public static IEnumerable<object[]> IdentifierCases() =>
+        new object[][]
         {
-            new(TK.Identifier, "word"),
-            new(TK.Identifier, "CAPITAL"),
-            new(TK.Identifier, "MiXeD"),
-            new(TK.Identifier, "s"),
-            new(TK.EndOfFile, ""),
+            new object[]
+            {
+                "xxx",
+                new TokenExpectation[]
+                {
+                    new(TK.Identifier, "xxx"),
+                    new(TK.EndOfFile, ""),
+                },
+            },
+            new object[]
+            {
+                "    \n \n\t word \nCAPITAL\t\v\nMiXeD s",
+                new TokenExpectation[]
+                {
+                    new(TK.Identifier, "word"),
+                    new(TK.Identifier, "CAPITAL"),
+                    new(TK.Identifier, "MiXeD"),
+                    new(TK.Identifier, "s"),
+                    new(TK.EndOfFile, ""),
+                },
+            }
         };
 
+    [Theory]
+    [MemberData(nameof(IdentifierCases))]
+    public void Identifiers(string query, object[] expectationsOpaque)
+    {
+        var expectations = expectationsOpaque.Cast<TokenExpectation>().ToArray();
+        AssertTokensMeetExpectations(query, expectations);
+    }
+
+    // TODO(jh) Inline this and other theories
+    public static IEnumerable<object[]> LiteralsCases() =>
+        new object[][]
+        {
+            new object[]
+            {
+                "\"string\"",
+                new TokenExpectation[]
+                {
+                    new(TK.Literal, "\"string\"", t => t.StringValue == "string"),
+                    new(TK.EndOfFile, ""),
+                }
+            },
+            new object[]
+            {
+                "1234",
+                new TokenExpectation[]
+                {
+                    new(TK.Literal, "1234", t => t.IntValue == 1234),
+                    new(TK.EndOfFile, ""),
+                }
+            },
+            new object[]
+            {
+                "1.234",
+                new TokenExpectation[]
+                {
+                    new(TK.Literal, "1.234", t => t.DoubleValue == 1.234),
+                    new(TK.EndOfFile, ""),
+                }
+            },
+            new object[]
+            {
+                "true",
+                new TokenExpectation[]
+                {
+                    new(TK.Literal, "true", t => t.BoolValue == true),
+                    new(TK.EndOfFile, ""),
+                }
+            },
+            new object[]
+            {
+                $"""
+                0 123   12345687 1.0 3.1
+                3.1415926535897932384626433832795028841971693993751058209
+                {Quote}{Quote}"1"
+                "string
+                with newlines
+                ""true"
+                true false
+                """,
+                new TokenExpectation[]
+                {
+                    new(TK.Literal, "0", t => t.IntValue == 0),
+                    new(TK.Literal, "123", t => t.IntValue == 123),
+                    new(TK.Literal, "12345687", t => t.IntValue == 12345687),
+                    new(TK.Literal, "1.0", t => t.DoubleValue == 1.0),
+                    new(TK.Literal, "3.1", t => t.DoubleValue == 3.1),
+                    new(TK.Literal, "3.1415926535897932384626433832795028841971693993751058209",
+                        t => t.DoubleValue == 3.141592653589793),
+                    new(TK.Literal, "\"\"", t => t.StringValue == ""),
+                    new(TK.Literal, "\"1\"", t => t.StringValue == "1"),
+                    new(TK.Literal, "\"string\r\nwith newlines\r\n\"", t => t.StringValue == "string\r\nwith newlines\r\n"),
+                    new(TK.Literal, "\"true\"", t => t.StringValue == "true"),
+                    new(TK.Literal, "true", t => t.BoolValue == true),
+                    new(TK.Literal, "false", t => t.BoolValue == false),
+                    new(TK.EndOfFile, ""),
+                }
+            }
+        };
+
+    [Theory]
+    [MemberData(nameof(LiteralsCases))]
+    public void Literals(string query, object[] expectationsOpaque)
+    {
+        var expectations = expectationsOpaque.Cast<TokenExpectation>().ToArray();
         AssertTokensMeetExpectations(query, expectations);
     }
 
     [Fact]
-    public void Literals()
+    public void BinaryOperatorAlternate()
     {
-        var query = $"""
+        AssertTokensMeetExpectations(
+            "eq NE le lt ge gt AND Or",
+            new TokenExpectation[]
+            {
+                new(TK.Equal, "eq"),
+                new(TK.NotEqual, "NE"),
+                new(TK.LessThanOrEqual, "le"),
+                new(TK.LessThan, "lt"),
+                new(TK.GreaterThanOrEqual, "ge"),
+                new(TK.GreaterThan, "gt"),
+                new(TK.And, "AND"),
+                new(TK.Or, "Or"),
+                new(TK.EndOfFile, ""),
+            });
+    }
 
-        0 123   12345687 1.0 3.1
-        3.1415926535897932384626433832795028841971693993751058209
-        {Quote}{Quote}"1" " x1" "1x "
-        "string
-        with newlines
-        ""true"
-        true false
-        
-        """;
-        var expectations = new TokenExpectation[]
+    [Theory]
+    [InlineData("\"unterminated string")]
+    [InlineData("' unexpected character")]
+    public void ErrorReporting(string query)
+    {
+        Assert.Throws<QueryCompilationException>(() =>
         {
-            new(TK.IntegerLiteral, "0", t => t.IntValue == 0),
-            new(TK.IntegerLiteral, "123", t => t.IntValue == 123),
-            new(TK.IntegerLiteral, "12345687", t => t.IntValue == 12345687),
-            new(TK.FloatingPointLiteral, "1.0", t => t.DoubleValue == 1.0),
-            new(TK.FloatingPointLiteral, "3.1", t => t.DoubleValue == 3.1),
-            new(TK.FloatingPointLiteral, "3.1415926535897932384626433832795028841971693993751058209", t => t.DoubleValue == 3.141592653589793),
-            new(TK.StringLiteral, "\"\"", t => t.StringValue == ""),
-            new(TK.StringLiteral, "\"1\"", t => t.StringValue == "1"),
-            new(TK.StringLiteral, "\" x1\"", t => t.StringValue == " x1"),
-            new(TK.StringLiteral, "\"1x \"", t => t.StringValue == "1x "),
-            new(TK.StringLiteral, "\"string\r\nwith newlines\r\n\"", t => t.StringValue == "string\r\nwith newlines\r\n"),
-            new(TK.StringLiteral, "\"true\"", t => t.StringValue == "true"),
-            new(TK.BooleanLiteral, "true", t => t.BoolValue == true),
-            new(TK.BooleanLiteral, "false", t => t.BoolValue == false),
-            new(TK.EndOfFile, ""),
-        };
-
-        AssertTokensMeetExpectations(query, expectations);
+            var scanner = new Scanner(query);
+            while (scanner.Pop().Kind != TK.EndOfFile) { }
+        });
     }
 }

@@ -8,7 +8,8 @@ internal record ParserContext(
     Dictionary<string, MemberInfo> Members,
     ParameterExpression InputParameter);
 
-// TODO(jh) Unary for -, !, ~ etc.
+// TODO(jh) Array indexing
+// TODO(jh) Member access
 
 internal class Parser
 {
@@ -24,12 +25,29 @@ internal class Parser
 
         while (true)
         {
-            var token = _scanner.PeekToken();
+            if (_scanner.TryPop(TokenKind.SpecialBinaryOperator) is { } token)
+            {
+                var specialOperatorInfo = TryGetSpecialOperatorInfo(token.Text)!;
+                var specialRight = ParseExpression(int.MaxValue);
+                left = Expression.Call(null, specialOperatorInfo.Method, left, specialRight);
+                continue;
+            }
+
+            if (_scanner.TryPop(TokenKind.NestedQueryOperator) != null)
+            {
+                _scanner.Require(TokenKind.BlockOpen);
+                // TODO(jh) Compile expression of type T of IEnumerable<T> field with the current scanner
+                _scanner.Require(TokenKind.BlockClose);
+                _scanner.ThrowError(0, "Nested queries are not implemented yet");
+                continue;
+            }
+
+            token = _scanner.Peek();
             var operatorInfo = TryGetBinaryOperatorInfo(token.Kind);
             if (operatorInfo == null || operatorInfo.Precedence <= previousPrecendence)
                 return left;
 
-            _scanner.PopToken();
+            _scanner.Pop();
 
             var right = ParseExpression(operatorInfo.Precedence);
             left = Expression.MakeBinary(operatorInfo.ExpressionType, left, right);
@@ -38,7 +56,7 @@ internal class Parser
 
     private Expression ParsePrimaryExpression()
     {
-        var token = _scanner.PopToken();
+        var token = _scanner.Pop();
         switch (token.Kind)
         {
             case TokenKind.Identifier:
@@ -47,13 +65,16 @@ internal class Parser
                     // TODO(jh) Unify the StringComparison types everywhere
                     var shortcutPossibilities = _context.Members
                         .Where(x => x.Key.StartsWith(token.Text, StringComparison.OrdinalIgnoreCase))
-                        .ToArray();  // TODO(jh) .Take(2)?
+                        .ToArray();
 
                     if (shortcutPossibilities.Length == 0)
-                        throw new Exception($"TODO Member {token.Text} not found");
+                        _scanner.ThrowError(token.Start, $"Member '{token.Text}' not found");
 
                     if (shortcutPossibilities.Length > 1)
-                        throw new Exception($"TODO {token.Text} is ambiguous: {string.Join(", ", shortcutPossibilities)}");
+                    {
+                        var possibilityEnumeration = string.Join(", ", shortcutPossibilities.Select(x => x.Key));
+                        _scanner.ThrowError(token.Start, $"'{token.Text}' is ambiguous: {possibilityEnumeration}");
+                    }
 
                     memberInfo = shortcutPossibilities[0].Value;
                 }
@@ -62,28 +83,26 @@ internal class Parser
                     _context.InputParameter,
                     memberInfo);
 
-            case TokenKind.StringLiteral:
-            case TokenKind.IntegerLiteral:
-            case TokenKind.FloatingPointLiteral:
-            case TokenKind.BooleanLiteral:
-                return Expression.Constant(token.OpaqueLiteralValue);
+            case TokenKind.Literal:
+                return Expression.Constant(token.LiteralValue!.Value.Opaque);
 
             case TokenKind.ParenthesisOpen:
                 var expression = ParseExpression();
-                if (_scanner.PopToken().Kind != TokenKind.ParenthesisClose)
-                    throw new Exception("TODO(jh) scanner.Require(predicate, errorMessage)");
+                _scanner.Require(TokenKind.ParenthesisClose);
+
                 return expression;
 
             case TokenKind.Minus:
             case TokenKind.Not:
-            case TokenKind.BitwiseNot:
+                //case TokenKind.BitwiseNot:
                 var operatorInfo = TryGetUnaryOperatorInfo(token.Kind)!;
                 return Expression.MakeUnary(operatorInfo.ExpressionType, ParseExpression(), null!);
 
-            // TODO(jh)
-
             default:
-                throw new Exception("TODO(jh) Error message for invalid expression token");
+                _scanner.ThrowError(token.Start, "Invalid expression token");
+                break;
         }
+
+        throw new();
     }
 }

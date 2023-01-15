@@ -1,8 +1,17 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using static Bundlor.QueryCompiler.TokenConstants;
 
 namespace Bundlor.QueryCompiler;
+
+public class QueryCompilationException : Exception
+{
+    public QueryCompilationException(string? message = null, Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
 
 internal class Scanner
 {
@@ -22,28 +31,48 @@ internal class Scanner
 
     private char this[int index] => index < _input.Length ? _input[index] : '\0';
     private char Current => this[_position];
+    private void Next() => ++_position;
     private string Cut() => _input.Substring(_currentTokenStart, _position - _currentTokenStart);
 
-    public Token PeekToken()
+    public Token Peek()
     {
         var copy = new Scanner(this);
-        return copy.PopToken();
+        return copy.Pop();
     }
 
-    public Token? TryPopToken(TokenKind kind)
+    public Token? TryPop(TokenKind kind)
     {
-        if (PeekToken().Kind != kind)
+        if (Peek().Kind != kind)
             return null;
 
-        return PopToken();
+        return Pop();
     }
 
-    public Token PopToken()
+    public Token Require(TokenKind kind)
+    {
+        var token = Pop();
+        if (token.Kind != kind)
+            ThrowError(token.Start, $"Expected {kind}");
+
+        return token;
+    }
+
+    [DoesNotReturn]
+    public void ThrowError(int position, string message) =>
+        throw new QueryCompilationException($"Query compilation failed, error at position {position}: {message}");
+
+    public void EnsureEofReached()
+    {
+        if (!EofReached && Peek().Kind != TokenKind.EndOfFile)
+            ThrowError(_position, "Extraneous tokens that could not be parsed");
+    }
+
+    public Token Pop()
     {
         Debug.Assert(!EofReached);
 
         while (char.IsWhiteSpace(Current))
-            ++_position;
+            Next();
 
         _currentTokenStart = _position;
 
@@ -51,23 +80,24 @@ internal class Scanner
         if (char.IsLetter(Current) || Current == '_')
         {
             while (char.IsLetter(Current) || char.IsNumber(Current) || Current == '_')
-                ++_position;
+                Next();
 
             var word = Cut();
 
-
-            // TODO(jh) not?
-            if (SpecialBinaryOperators.Any(x => x.Equals(word, StringComparison.OrdinalIgnoreCase)))
-                return new Token(TokenKind.SpecialBinaryOperator, word);
+            if (TryGetSpecialOperatorInfo(word) != null)
+                return MakeToken(TokenKind.SpecialBinaryOperator, word);
 
             if (NestedQueryOperators.Any(x => x.Equals(word, StringComparison.OrdinalIgnoreCase)))
-                return new Token(TokenKind.NestedQueryOperator, word);
+                return MakeToken(TokenKind.NestedQueryOperator, word);
+
+            if (TryGetBinaryOperatorInfoByAlternate(word) is { } operatorInfo)
+                return MakeToken(operatorInfo.TokenKind, word);
 
             return word switch
             {
-                "true" => new Token(TokenKind.BooleanLiteral, word) { BoolValue = true },
-                "false" => new Token(TokenKind.BooleanLiteral, word) { BoolValue = false },
-                _ => new Token(TokenKind.Identifier, word),
+                "true" => MakeToken(TokenKind.Literal, word, new LiteralValue() { BoolValue = true }),
+                "false" => MakeToken(TokenKind.Literal, word, new LiteralValue() { BoolValue = false }),
+                _ => MakeToken(TokenKind.Identifier, word),
             };
         }
 
@@ -75,42 +105,53 @@ internal class Scanner
         if (char.IsNumber(Current))
         {
             while (char.IsNumber(Current))
-                ++_position;
+                Next();
 
-            if (Current != '.')
+            switch (Current)
             {
-                var intString = Cut();
-                var intValue = int.Parse(intString);  // TODO(jh) Try & error message
+                case '.':
+                    Next();
+                    while (char.IsNumber(Current))
+                        Next();
 
-                return new Token(TokenKind.IntegerLiteral, intString) { IntValue = intValue };
+                    var doubleString = Cut();
+                    var doubleValue = double.Parse(doubleString, CultureInfo.InvariantCulture);
+
+                    return MakeToken(TokenKind.Literal, doubleString, new LiteralValue() { DoubleValue = doubleValue });
+
+                case ':':
+                // 0000:00:00.0000
+                // TODO(jh) Parse TimeSpan literal
+
+                case '/':
+                // yyyy/MM/dd
+                // TODO(jh) Parse DateTime literal
+
+                default:
+                    var intString = Cut();
+                    var intValue = int.Parse(intString);  // TODO(jh) Try & error message
+
+                    return MakeToken(TokenKind.Literal, intString, new LiteralValue() { IntValue = intValue });
             }
-
-            ++_position;
-            while (char.IsNumber(Current))
-                ++_position;
-
-            var doubleString = Cut();
-            var doubleValue = double.Parse(doubleString, CultureInfo.InvariantCulture);
-
-            return new Token(TokenKind.FloatingPointLiteral, doubleString) { DoubleValue = doubleValue };
         }
 
         // String literal?
         if (Current == '"')
         {
-            ++_position;
+            Next();
             while (Current != '"' && Current != '\0')
-                ++_position;
-            ++_position;
+                Next();
 
             if (Current == '\0')
-                throw new Exception("TODO unterminated string literal");
+                ThrowError(_position, "Unterminated string literal");
+
+            Next();
 
             var stringWithQuotes = Cut();
-            return new Token(TokenKind.StringLiteral, stringWithQuotes)
+            return MakeToken(TokenKind.Literal, stringWithQuotes, new LiteralValue()
             {
                 StringValue = stringWithQuotes.Substring(1, stringWithQuotes.Length - 2)
-            };
+            });
         }
 
         // Binary operator?
@@ -128,20 +169,29 @@ internal class Scanner
 
             _position += operatorInfo.Operator.Length;
 
-            return new Token(operatorInfo.TokenKind, Cut());
+            return MakeToken(operatorInfo.TokenKind, Cut());
         }
 
         switch (Current)
         {
-            case '(': ++_position; return new Token(TokenKind.ParenthesisOpen, "(");
-            case ')': ++_position; return new Token(TokenKind.ParenthesisClose, ")");
-            case '{': ++_position; return new Token(TokenKind.BlockOpen, "{");
-            case '}': ++_position; return new Token(TokenKind.BlockClose, "}");
-            case '-': ++_position; return new Token(TokenKind.Minus, "-");
-            case '!': ++_position; return new Token(TokenKind.Not, "!");
-            case '~': ++_position; return new Token(TokenKind.BitwiseNot, "~");
-            case '\0': EofReached = true; return new Token(TokenKind.EndOfFile, "");
-            default: throw new Exception($"TODO unexpected character '{Current}'");
+            case '(': Next(); return MakeToken(TokenKind.ParenthesisOpen, "(");
+            case ')': Next(); return MakeToken(TokenKind.ParenthesisClose, ")");
+            case '{': Next(); return MakeToken(TokenKind.BlockOpen, "{");
+            case '}': Next(); return MakeToken(TokenKind.BlockClose, "}");
+            case '*': Next(); return MakeToken(TokenKind.Multiply, "*");
+            case '/': Next(); return MakeToken(TokenKind.Divide, "/");
+            case '+': Next(); return MakeToken(TokenKind.Plus, "+");
+            case '-': Next(); return MakeToken(TokenKind.Minus, "-");
+            case '!': Next(); return MakeToken(TokenKind.Not, "!");
+            //case '~': Next(); return MakeToken(TokenKind.BitwiseNot, "~");
+            case '\0': EofReached = true; return MakeToken(TokenKind.EndOfFile, "");
+            default: ThrowError(_position, $"Unexpected character '{Current}'"); break;
         }
+
+        throw new();
     }
+
+    // TODO(jh) text could be replaced by doing Cut() here, right?
+    private Token MakeToken(TokenKind kind, string text, LiteralValue? literalValue = null) =>
+        new Token(_currentTokenStart, kind, text, literalValue);
 }

@@ -1,27 +1,37 @@
 ﻿using System.Linq.Expressions;
+using System.Reflection;
 
 namespace Bundlor.QueryCompiler;
 
 internal enum TokenKind
 {
+    // Comparison
     Equal,
     NotEqual,
-    LessThanOrEqual,
     LessThan,
-    GreaterThanOrEqual,
+    LessThanOrEqual,
     GreaterThan,
+    GreaterThanOrEqual,
+
+    // Logical
     And,
     Or,
-    Minus,
+
+    // Arithmetical
+    Plus,
+    Minus,  // Also unary
+    Multiply,
+    Divide,
+
+    // Unary
     Not,
-    BitwiseNot,
+
+    // Other
     Identifier,
-    SpecialBinaryOperator,
-    NestedQueryOperator,
-    StringLiteral,
-    IntegerLiteral,
-    FloatingPointLiteral,
-    BooleanLiteral,
+    SpecialIdentifier,  // like '@now'
+    SpecialBinaryOperator,  // like 'matches'
+    NestedQueryOperator,  // like 'any'
+    Literal,
     ParenthesisOpen,
     ParenthesisClose,
     BlockOpen,
@@ -29,25 +39,8 @@ internal enum TokenKind
     EndOfFile,
 }
 
-internal record class BinaryOperatorInfo(
-    string Operator,
-    string Alternate,
-    TokenKind TokenKind,
-    ExpressionType ExpressionType,
-    int Precedence);
-
-internal record class UnaryOperatorInfo(
-    char Operator,
-    TokenKind TokenKind,
-    ExpressionType ExpressionType);
-
-internal readonly struct Token
+internal readonly struct LiteralValue
 {
-    public Token(TokenKind kind, string text) => (Kind, Text) = (kind, text);
-
-    public readonly TokenKind Kind;
-    public readonly string Text;
-
     private readonly string? _stringValue;
     public string? StringValue
     {
@@ -76,7 +69,14 @@ internal readonly struct Token
         init => _boolValue = value;
     }
 
-    public object OpaqueLiteralValue
+    private readonly TimeSpan? _timeSpanValue;
+    public TimeSpan? TimeSpanValue
+    {
+        get => _timeSpanValue ?? throw new InvalidOperationException();
+        init => _timeSpanValue = value;
+    }
+
+    public object Opaque
     {
         get
         {
@@ -84,40 +84,108 @@ internal readonly struct Token
             if (_intValue != null) return _intValue;
             if (_doubleValue != null) return _doubleValue;
             if (_boolValue != null) return _boolValue;
+            if (_timeSpanValue != null) return _timeSpanValue;  // TODO(jh) Might not be compatible with Expression.Constant()
             throw new InvalidOperationException();
         }
     }
+}
+
+internal readonly struct Token
+{
+    public Token(int start, TokenKind kind, string text, LiteralValue? literalValue)
+    {
+        Start = start;
+        Kind = kind;
+        Text = text;
+        LiteralValue = literalValue;
+    }
+
+    public readonly int Start;
+    public readonly TokenKind Kind;
+    public readonly string Text;
+    public readonly LiteralValue? LiteralValue;
+
+    public string StringValue => LiteralValue!.Value.StringValue!;
+    public int IntValue => LiteralValue!.Value.IntValue!.Value;
+    public double DoubleValue => LiteralValue!.Value.DoubleValue!.Value;
+    public bool BoolValue => LiteralValue!.Value.BoolValue!.Value;
+    public TimeSpan TimeSpanValue => LiteralValue!.Value.TimeSpanValue!.Value;
 
     public override string ToString() => Text;
 }
+
+internal record class BinaryOperatorInfo(
+    string Operator,
+    string Alternate,
+    TokenKind TokenKind,
+    ExpressionType ExpressionType,
+    int Precedence);
+
+// TODO(jh) Alternate
+internal record class UnaryOperatorInfo(
+    char Operator,
+    TokenKind TokenKind,
+    ExpressionType ExpressionType);
+
+internal record class SpecialBinaryOperatorInfo(
+    string Operator,
+    MethodInfo Method);
 
 internal static class TokenConstants
 {
     public static readonly BinaryOperatorInfo[] BinaryOperators = new BinaryOperatorInfo[]
     {
-        new("==","eq", TokenKind.Equal, ExpressionType.Equal, 100),
-        new("!=","ne", TokenKind.NotEqual, ExpressionType.NotEqual, 100),
-        new("<=","le", TokenKind.LessThanOrEqual, ExpressionType.LessThanOrEqual, 90),
+        new("*", "mul", TokenKind.Multiply, ExpressionType.Multiply, 120),
+        new("/", "div", TokenKind.Divide, ExpressionType.Divide, 120),
+
+        new("+", "add", TokenKind.Plus, ExpressionType.Add, 110),
+        new("-", "sub", TokenKind.Minus, ExpressionType.Subtract, 110),
+
+        new("==", "eq", TokenKind.Equal, ExpressionType.Equal, 100),
+        new("!=", "ne", TokenKind.NotEqual, ExpressionType.NotEqual, 100),
+
+        // NOTE(jh) 'XXXOrEqual' must come before XXX for the scanner to work
+        new("<=", "le", TokenKind.LessThanOrEqual, ExpressionType.LessThanOrEqual, 90),
         new("<", "lt", TokenKind.LessThan, ExpressionType.LessThan, 90),
-        new(">=","ge", TokenKind.GreaterThanOrEqual, ExpressionType.GreaterThanOrEqual, 90),
+        new(">=", "ge", TokenKind.GreaterThanOrEqual, ExpressionType.GreaterThanOrEqual, 90),
         new(">", "gt", TokenKind.GreaterThan, ExpressionType.GreaterThan, 90),
-        new("&&","and", TokenKind.And, ExpressionType.And, 80),
-        new("||","or", TokenKind.Or, ExpressionType.Or, 70),
+
+        new("&&", "and", TokenKind.And, ExpressionType.And, 80),
+
+        new("||", "or", TokenKind.Or, ExpressionType.Or, 70),
     };
 
-    public static BinaryOperatorInfo? TryGetBinaryOperatorInfo(TokenKind tokenKind)
-        => BinaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);
-
-    public static readonly UnaryOperatorInfo[] UnaryOperators = new UnaryOperatorInfo[]
+    private static readonly UnaryOperatorInfo[] UnaryOperators = new UnaryOperatorInfo[]
     {
         new('-', TokenKind.Minus, ExpressionType.Negate),
         new('!', TokenKind.Not, ExpressionType.Not),
-        new('~', TokenKind.BitwiseNot, ExpressionType.Not),
+        //new('~', TokenKind.BitwiseNot, ExpressionType.Not),  // TODO(jh) Make this also a string match operator
     };
 
-    public static UnaryOperatorInfo? TryGetUnaryOperatorInfo(TokenKind tokenKind)
-        => UnaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);
+    private static readonly SpecialBinaryOperatorInfo[] SpecialBinaryOperators = new SpecialBinaryOperatorInfo[]
+    {
+        /*
+        new("older", typeof(SpecialBinaryOperatorFunctions).GetMethod("Older")!),
+        new("newer", typeof(SpecialBinaryOperatorFunctions).GetMethod("Newer")!),
+        */
+        new("like", typeof(SpecialBinaryOperatorFunctions).GetMethod("Like")!),
+        //new("ilike", typeof(SpecialBinaryOperatorFunctions).GetMethod("Ilike")!),
+        new("matches", typeof(SpecialBinaryOperatorFunctions).GetMethod("Matches")!),
+    };
 
-    public static readonly string[] SpecialBinaryOperators = new[] { "older", "newer", "like", "ilike", "matches" };
     public static readonly string[] NestedQueryOperators = new[] { "any", "all" };
+
+    public static BinaryOperatorInfo? TryGetBinaryOperatorInfo(TokenKind tokenKind) =>
+        BinaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);
+
+    public static BinaryOperatorInfo? TryGetBinaryOperatorInfoByAlternate(string value) =>
+        BinaryOperators.FirstOrDefault(x =>
+            x.Alternate.Equals(value, StringComparison.OrdinalIgnoreCase));
+
+    public static UnaryOperatorInfo? TryGetUnaryOperatorInfo(TokenKind tokenKind) =>
+        UnaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);
+
+    public static SpecialBinaryOperatorInfo? TryGetSpecialOperatorInfo(string text) =>
+        SpecialBinaryOperators.FirstOrDefault(x =>
+            x.Operator.Equals(text, StringComparison.OrdinalIgnoreCase));
 }

@@ -15,14 +15,14 @@ public class CompilerTests
 
     public struct SampleStruct
     {
-        public string String1;
-        public string String2 { get; set; }
-        public int Integer1;
-        public int Integer2 { get; set; }
-        public double Double1;
-        public double Double2 { get; set; }
-        public bool Bool1;
-        public bool Bool2 { get; set; }
+        public string FirstName;
+        public string LastName { get; set; }
+        public int LoginAttempts;
+        public int NumberOfTeeth { get; set; }
+        public double CoolnessFactor;
+        public double WordsPerMinute { get; set; }
+        public bool NamesAreDifficult;
+        public bool Flagged { get; set; }
         public StructField Record;
     }
 
@@ -116,23 +116,77 @@ public class CompilerTests
             });
     }
 
+    [Fact]
+    public void Negation()
+    {
+        AssertTruthTable(
+            "!(a == b)",
+            new TruthTableRow[]
+            {
+                new(false, 0, 0, 1),
+                new(true,  0, 1, 0),
+                new(true,  0, 1, 1),
+                new(true,  1, 0, 0),
+                new(true,  1, 0, 1),
+                new(false, 1, 1, 0),
+                new(false, 1, 1, 1),
+            });
+    }
+
     public static IEnumerable<object[]> ComparisonCases() =>
         new object[][]
         {
-            new object[] { new SampleStruct { Integer1 = 1 }, "integer1 == 1", true },
-            new object[] { new SampleStruct { Integer1 = 1 }, "integer1 == 0", false },
-            new object[] { new SampleStruct { Integer1 = 1 }, "integer1 == 782349", false },
-            new object[] { new SampleStruct { Integer1 = 1 }, "integer1 > 0", true },
-            new object[] { new SampleStruct { Integer1 = 1 }, "integer1 > 1", false},
-            new object[] { new SampleStruct { Integer1 = 1 }, "integer1 > -111", true},
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt == 123", true },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt == 729", false },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt != 0",   true },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt != 123", false },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt > -100", true },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt >  123", false },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt >= 123", true },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt >= 124", false },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt < 9999", true },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt <  123", false },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt <= 123", true },
+            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt <= 122", false },
+            new object[]
+            {
+                new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
+                """first eq "jan" and loginatt >= 122""",
+                true,
+            },
+            new object[]
+            {
+                new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
+                """first ne "jan" and loginatt >= 122""",
+                false,
+            },
         };
 
     [Theory]
     [MemberData(nameof(ComparisonCases))]
-    public void StringComparison(SampleStruct record, string query, bool expectedFilterResult)
+    public void ComparisonOperators(SampleStruct record, string query, bool expectedFilterResult)
     {
         var filter = Compile<SampleStruct>(query);
         var filterResult = filter(record);
         Assert.Equal(expectedFilterResult, filterResult);
+    }
+
+    [Fact]
+    public void AllInOne()
+    {
+        // TODO(jh)
+        // Enough poking around! Let's do one where all the features are combined
+        // in one query.
+        // This query should feature:
+        // * Binary operator precedence
+        // * Parenthesis
+        // * Comparisons
+        // * Binary operator alternate
+        // * Case insensitive (nested) shortcuts
+        // * All kinds of literals
+        // * Member comparison (with each other, not only literals)
+        // * Nested query operators
+        // * Special binary operators (string match/regex & DateTime)
+        // * Unary operators
     }
 }

@@ -28,8 +28,7 @@ manager.name ilike "steven*" || users not all { street like "*29" }
 
 // TODO(jh) Make everything as resilient as possible - case insensitive, shortcuts (if not ambiguous etc.)
 // TODO(jh) Make more efficient by using ReadOnlySpan<char> etc.
-// TODO(jh) String quotes are optional for words without whitespace on right side of binary operator
-// TODO(jh) Tests
+// TODO(jh) String quotes are optional for words without whitespace on right side of binary operator?
 // TODO(jh) Benchmarks
 
 /*
@@ -59,15 +58,17 @@ public static class QueryCompiler
     internal static (Expression expression, ParameterExpression) CompileFilterExpression<T>(string query)
     {
         var members = typeof(T).GetProperties()
-         .Cast<MemberInfo>()
-         .Concat(typeof(T).GetFields())
-         .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
-        var inputParameter = Expression.Parameter(typeof(T), "input");  // TODO(jh) 'in' in case of structs?
+            .Cast<MemberInfo>()
+            .Concat(typeof(T).GetFields())
+            .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
+        var inputParameter = Expression.Parameter(typeof(T), "input");
 
         var scanner = new Scanner(query);
         var parser = new Parser(scanner, new ParserContext(members, inputParameter));
 
         var filterExpression = parser.ParseExpression();
+
+        scanner.EnsureEofReached();
 
         return (filterExpression, inputParameter);
     }
