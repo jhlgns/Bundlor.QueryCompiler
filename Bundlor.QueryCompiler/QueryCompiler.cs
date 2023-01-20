@@ -49,27 +49,35 @@ public static class QueryCompiler
 {
     public static Func<T, bool> Compile<T>(string query)
     {
-        var (filterExpression, inputParameter) = CompileFilterExpression<T>(query);
-        var lambda = Expression.Lambda<Func<T, bool>>(filterExpression, inputParameter);
-
+        var lambda = CompileFilterExpression<T>(query);
         return lambda.Compile();
     }
 
-    internal static (Expression expression, ParameterExpression) CompileFilterExpression<T>(string query)
+    internal static Expression<Func<T, bool>> CompileFilterExpression<T>(string query)
     {
-        var members = typeof(T).GetProperties()
-            .Cast<MemberInfo>()
-            .Concat(typeof(T).GetFields())
-            .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
-        var inputParameter = Expression.Parameter(typeof(T), "input");
-
         var scanner = new Scanner(query);
-        var parser = new Parser(scanner, new ParserContext(members, inputParameter));
-
-        var filterExpression = parser.ParseExpression();
+        var result = CompileFilterExpression(typeof(T), scanner, 0);
 
         scanner.EnsureEofReached();
 
-        return (filterExpression, inputParameter);
+        return (Expression<Func<T, bool>>)result;
+    }
+
+    internal static LambdaExpression CompileFilterExpression(Type type, Scanner scanner, int depth)
+    {
+        var members = type.GetProperties()
+            .Cast<MemberInfo>()
+            .Concat(type.GetFields())
+            .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
+        var inputParameter = Expression.Parameter(type, $"x{depth}");
+
+        var parser = new Parser(scanner, new ParserContext(depth, members, inputParameter));
+
+        var filterExpression = parser.ParseExpression();
+
+        var lambdaDelegateType = typeof(Func<,>).MakeGenericType(type, typeof(bool));
+        var lambda = Expression.Lambda(lambdaDelegateType, filterExpression, inputParameter);
+
+        return lambda;
     }
 }

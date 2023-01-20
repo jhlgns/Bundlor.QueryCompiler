@@ -1,10 +1,13 @@
-﻿using System.Linq.Expressions;
+﻿using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq.Expressions;
 using System.Reflection;
 using static Bundlor.QueryCompiler.TokenConstants;
 
 namespace Bundlor.QueryCompiler;
 
 internal record ParserContext(
+    int Depth,
     Dictionary<string, MemberInfo> Members,
     ParameterExpression InputParameter);
 
@@ -19,26 +22,36 @@ internal class Parser
     public Parser(Scanner scanner, ParserContext context) =>
         (_scanner, _context) = (scanner, context);
 
-    internal Expression ParseExpression(int previousPrecendence = 0)
+    internal Expression ParseExpression(int previousPrecendence = int.MinValue)
     {
         var left = ParsePrimaryExpression();
 
         while (true)
         {
-            if (_scanner.TryPop(TokenKind.SpecialBinaryOperator) is { } token)
-            {
-                var specialOperatorInfo = TryGetSpecialOperatorInfo(token.Text)!;
-                var specialRight = ParseExpression(int.MaxValue);
-                left = Expression.Call(null, specialOperatorInfo.Method, left, specialRight);
-                continue;
-            }
-
-            if (_scanner.TryPop(TokenKind.NestedQueryOperator) != null)
+            if (_scanner.TryPop(TokenKind.NestedQueryOperator) is { } token)
             {
                 _scanner.Require(TokenKind.BlockOpen);
-                // TODO(jh) Compile expression of type T of IEnumerable<T> field with the current scanner
+
+                // TODO(jh) Make function for this
+
+                var elementType = left.Type.GetInterfaces()
+                    .FirstOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+                    ?.GetGenericArguments()?.Single()
+                    ?? throw new InvalidOperationException($"{left.Type} is not a subclass of IEnumerable<>");
+                var filterExpression = QueryCompiler.CompileFilterExpression(elementType, _scanner, _context.Depth + 1);
+                var enumerableType = typeof(IEnumerable<>).MakeGenericType(elementType);
+                var lambdaParameterType = typeof(Func<,>).MakeGenericType(elementType, typeof(bool));
+                var method = token.Text.ToLower() switch
+                {
+                    "any" => typeof(Enumerable).GetMethod("Any", BindingFlags.Static, new[] { enumerableType, lambdaParameterType })!,
+                    "all" => typeof(Enumerable).GetMethod("All", BindingFlags.Static, new[] { enumerableType, lambdaParameterType })!,
+                    _ => throw new InvalidOperationException($"Could not find nested query operator function for {token.Text}"),
+                };
+
                 _scanner.Require(TokenKind.BlockClose);
-                _scanner.ThrowError(0, "Nested queries are not implemented yet");
+
+                left = Expression.Call(left, method, filterExpression);
+
                 continue;
             }
 
@@ -50,7 +63,15 @@ internal class Parser
             _scanner.Pop();
 
             var right = ParseExpression(operatorInfo.Precedence);
-            left = Expression.MakeBinary(operatorInfo.ExpressionType, left, right);
+
+            if (operatorInfo.ExpressionType != null)
+            {
+                left = Expression.MakeBinary(operatorInfo.ExpressionType.Value, left, right);
+            }
+            else
+            {
+                left = Expression.Call(null, operatorInfo.Method!, left, right);
+            }
         }
     }
 
@@ -60,28 +81,8 @@ internal class Parser
         switch (token.Kind)
         {
             case TokenKind.Identifier:
-                if (!_context.Members.TryGetValue(token.Text, out var memberInfo))
-                {
-                    // TODO(jh) Unify the StringComparison types everywhere
-                    var shortcutPossibilities = _context.Members
-                        .Where(x => x.Key.StartsWith(token.Text, StringComparison.OrdinalIgnoreCase))
-                        .ToArray();
-
-                    if (shortcutPossibilities.Length == 0)
-                        _scanner.ThrowError(token.Start, $"Member '{token.Text}' not found");
-
-                    if (shortcutPossibilities.Length > 1)
-                    {
-                        var possibilityEnumeration = string.Join(", ", shortcutPossibilities.Select(x => x.Key));
-                        _scanner.ThrowError(token.Start, $"'{token.Text}' is ambiguous: {possibilityEnumeration}");
-                    }
-
-                    memberInfo = shortcutPossibilities[0].Value;
-                }
-
-                return Expression.MakeMemberAccess(
-                    _context.InputParameter,
-                    memberInfo);
+                var memberInfo = GetMemberInfo(token);
+                return Expression.MakeMemberAccess(_context.InputParameter, memberInfo);
 
             case TokenKind.Literal:
                 return Expression.Constant(token.LiteralValue!.Value.Opaque);
@@ -99,10 +100,32 @@ internal class Parser
                 return Expression.MakeUnary(operatorInfo.ExpressionType, ParseExpression(), null!);
 
             default:
-                _scanner.ThrowError(token.Start, "Invalid expression token");
+                _scanner.ThrowError(token.Start, $"Invalid expression token {token.Kind}");
                 break;
         }
 
         throw new();
+    }
+
+    private MemberInfo GetMemberInfo(Token token)
+    {
+        if (_context.Members.TryGetValue(token.Text, out var memberInfo))
+            return memberInfo;
+
+        // TODO(jh) Unify the StringComparison types everywhere
+        var shortcutPossibilities = _context.Members
+            .Where(x => x.Key.StartsWith(token.Text, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (shortcutPossibilities.Length == 0)
+            _scanner.ThrowError(token.Start, $"Member '{token.Text}' not found");
+
+        if (shortcutPossibilities.Length > 1)
+        {
+            var possibilityEnumeration = string.Join(", ", shortcutPossibilities.Select(x => x.Key));
+            _scanner.ThrowError(token.Start, $"'{token.Text}' is ambiguous: {possibilityEnumeration}");
+        }
+
+        return shortcutPossibilities[0].Value;
     }
 }

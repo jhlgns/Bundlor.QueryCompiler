@@ -57,6 +57,8 @@ internal static class SpecialBinaryOperatorFunctions
         return lookup[left.Length, right.Length];
     }
 
+    public static bool NotLike(string left, string right) => !Like(left, right);
+
     /*
     public static bool Ilike(string left, string right)
     {
@@ -65,11 +67,13 @@ internal static class SpecialBinaryOperatorFunctions
     }
     */
 
-    public static bool Matches(string left, string right)
+    public static bool MatchesRegex(string left, string right)
     {
         left ??= "";
         right ??= "";
 
         return Regex.IsMatch(left, right);
     }
+
+    public static bool DoesNotMatchRegex(string left, string right) => !MatchesRegex(left, right);
 }

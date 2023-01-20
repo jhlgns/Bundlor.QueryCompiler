@@ -84,14 +84,8 @@ internal class Scanner
 
             var word = Cut();
 
-            if (TryGetSpecialOperatorInfo(word) != null)
-                return MakeToken(TokenKind.SpecialBinaryOperator, word);
-
             if (NestedQueryOperators.Any(x => x.Equals(word, StringComparison.OrdinalIgnoreCase)))
                 return MakeToken(TokenKind.NestedQueryOperator, word);
-
-            if (TryGetBinaryOperatorInfoByAlternate(word) is { } operatorInfo)
-                return MakeToken(operatorInfo.TokenKind, word);
 
             return word switch
             {
@@ -120,12 +114,14 @@ internal class Scanner
                     return MakeToken(TokenKind.Literal, doubleString, new LiteralValue() { DoubleValue = doubleValue });
 
                 case ':':
-                // 0000:00:00.0000
-                // TODO(jh) Parse TimeSpan literal
+                    throw new NotImplementedException();
+                    // 0000:00:00.0000
+                    // TODO(jh) Parse TimeSpan literal
 
                 case '/':
-                // yyyy/MM/dd
-                // TODO(jh) Parse DateTime literal
+                    throw new NotImplementedException();
+                    // yyyy/MM/dd
+                    // TODO(jh) Parse DateTime literal
 
                 default:
                     var intString = Cut();

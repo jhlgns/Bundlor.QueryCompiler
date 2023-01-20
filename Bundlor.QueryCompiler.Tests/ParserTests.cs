@@ -10,6 +10,11 @@ public class ParserTests
 
     private static Expression Simplify(Expression expression)
     {
+        if (expression is LambdaExpression lambda)
+        {
+            return Simplify(lambda.Body);
+        }
+
         if (expression is BinaryExpression binary)
         {
             return Expression.MakeBinary(
@@ -28,7 +33,7 @@ public class ParserTests
 
         if (expression is MemberExpression member)
         {
-            // Here is the simplification: convert MemberExpressions ("input.Field")
+            // Here is the simplification: convert MemberExpressions ("x0.Field")
             // to a ParameterExpression (just "Field") to that the tests are easier
             // to read and write.
             return Expression.Parameter(member.Type, member.Member.Name);
@@ -38,7 +43,7 @@ public class ParserTests
     }
 
     private static Expression Parse<T>(string query) =>
-        Simplify(CompileFilterExpression<T>(query).expression);
+        Simplify(CompileFilterExpression<T>(query));
 
     [Fact]
     public void BinaryOperator()
@@ -47,7 +52,7 @@ public class ParserTests
         var isCorrect = expression is BinaryExpression
         {
             Left: ParameterExpression { Name: "A" },
-            NodeType: ExpressionType.And,
+            NodeType: ExpressionType.AndAlso,
             Right: ParameterExpression { Name: "B" },
         };
 
@@ -67,10 +72,10 @@ public class ParserTests
             Left: BinaryExpression
             {
                 Left: ParameterExpression { Name: "A" },
-                NodeType: ExpressionType.And,
+                NodeType: ExpressionType.AndAlso,
                 Right: ParameterExpression { Name: "B" },
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: ParameterExpression { Name: "C" },
         };
 
@@ -88,11 +93,11 @@ public class ParserTests
         var isCorrect = expression is BinaryExpression
         {
             Left: ParameterExpression { Name: "A" },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: BinaryExpression
             {
                 Left: ParameterExpression { Name: "B" },
-                NodeType: ExpressionType.And,
+                NodeType: ExpressionType.AndAlso,
                 Right: ParameterExpression { Name: "C" },
             },
         };
@@ -113,10 +118,10 @@ public class ParserTests
             Left: BinaryExpression
             {
                 Left: ParameterExpression { Name: "A" },
-                NodeType: ExpressionType.Or,
+                NodeType: ExpressionType.OrElse,
                 Right: ParameterExpression { Name: "B" },
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: ParameterExpression { Name: "C" },
         };
 
@@ -140,17 +145,17 @@ public class ParserTests
                 Left: BinaryExpression
                 {
                     Left: ParameterExpression { Name: "A" },
-                    NodeType: ExpressionType.And,
+                    NodeType: ExpressionType.AndAlso,
                     Right: ParameterExpression { Name: "B" },
                 },
-                NodeType: ExpressionType.And,
+                NodeType: ExpressionType.AndAlso,
                 Right: ParameterExpression { Name: "C" },
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: BinaryExpression
             {
                 Left: ParameterExpression { Name: "D" },
-                NodeType: ExpressionType.And,
+                NodeType: ExpressionType.AndAlso,
                 Right: ParameterExpression { Name: "E" },
             },
         };
@@ -177,18 +182,18 @@ public class ParserTests
                 Left: BinaryExpression
                 {
                     Left: ParameterExpression { Name: "A" },
-                    NodeType: ExpressionType.Or,
+                    NodeType: ExpressionType.OrElse,
                     Right: BinaryExpression
                     {
                         Left: ParameterExpression { Name: "B" },
-                        NodeType: ExpressionType.And,
+                        NodeType: ExpressionType.AndAlso,
                         Right: ParameterExpression { Name: "C" },
                     },
                 },
-                NodeType: ExpressionType.Or,
+                NodeType: ExpressionType.OrElse,
                 Right: ParameterExpression { Name: "D" },
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: ParameterExpression { Name: "E" },
         };
 
@@ -208,10 +213,10 @@ public class ParserTests
             Left: BinaryExpression
             {
                 Left: ParameterExpression { Name: "A" },
-                NodeType: ExpressionType.And,
+                NodeType: ExpressionType.AndAlso,
                 Right: ParameterExpression { Name: "B" },
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: ParameterExpression { Name: "C" },
         };
 
@@ -229,11 +234,11 @@ public class ParserTests
         var isCorrect = expression is BinaryExpression
         {
             Left: ParameterExpression { Name: "A" },
-            NodeType: ExpressionType.And,
+            NodeType: ExpressionType.AndAlso,
             Right: BinaryExpression
             {
                 Left: ParameterExpression { Name: "B" },
-                NodeType: ExpressionType.Or,
+                NodeType: ExpressionType.OrElse,
                 Right: ParameterExpression { Name: "C" },
             },
         };
@@ -244,22 +249,22 @@ public class ParserTests
     [Fact]
     public void StringSpecialBinaryOperators()
     {
-        var expression = Parse<ShortcutTest>("path LIke \"*.dll\" or Path matches password");
+        var expression = Parse<ShortcutTest>("path =? \"*.dll\" || Path =~ password");
         var isCorrect = expression is BinaryExpression
         {
             Left: MethodCallExpression
             {
-                Method: { Name: "Like" },
+                Method: { Name: nameof(SpecialBinaryOperatorFunctions.Like) },
                 Arguments:
                 [
                     ParameterExpression { Name: "Path" },
                     ConstantExpression { Value: "*.dll" },
                 ]
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: MethodCallExpression
             {
-                Method: { Name: "Matches" },
+                Method: { Name: nameof(SpecialBinaryOperatorFunctions.MatchesRegex) },
                 Arguments:
                 [
                     ParameterExpression { Name: "Path" },
@@ -277,7 +282,7 @@ public class ParserTests
         // TODO(jh) Nested shortcuts for member access
 
         var expression = Simplify(
-            CompileFilterExpression<ShortcutTest>("a != 0 || paSS == \"c0w4bung4\"").expression);
+            CompileFilterExpression<ShortcutTest>("a != 0 || paSS == \"c0w4bung4\""));
         var isCorrect = expression is BinaryExpression
         {
             Left: BinaryExpression
@@ -286,7 +291,7 @@ public class ParserTests
                 NodeType: ExpressionType.NotEqual,
                 Right: ConstantExpression { Value: 0 },
             },
-            NodeType: ExpressionType.Or,
+            NodeType: ExpressionType.OrElse,
             Right: BinaryExpression
             {
                 Left: ParameterExpression { Name: "Password" },

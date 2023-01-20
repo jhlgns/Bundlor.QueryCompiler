@@ -27,6 +27,7 @@ public class CompilerTests
         public bool NamesAreDifficult;
         public bool Flagged { get; set; }
         public StructField Record;
+        public List<StructField> List;
     }
 
     private void AssertTruthTable(string query, TruthTableRow[] truthTable)
@@ -154,13 +155,13 @@ public class CompilerTests
             new object[]
             {
                 new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
-                """first eq "jan" and loginatt >= 122""",
+                """first == "jan" && loginatt >= 122""",
                 true,
             },
             new object[]
             {
                 new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
-                """first ne "jan" and loginatt >= 122""",
+                """first != "jan" && loginatt < 122""",
                 false,
             },
         };
@@ -179,7 +180,7 @@ public class CompilerTests
     {
         // TODO(jh) Make it so that if the last token was a special string operator
         // the next token gets interpreted as a string literal until the next whitespace (?)
-        var filter = Compile<SampleStruct>("first like \"*n\" || last like \"k*a*\"");
+        var filter = Compile<SampleStruct>("first =? \"*n\" || last =? \"k*a*\"");
         Assert.True(filter(new SampleStruct { FirstName = "jan" }));
         Assert.True(filter(new SampleStruct { FirstName = "jahn" }));
         Assert.False(filter(new SampleStruct { FirstName = "jam" }));
@@ -191,12 +192,39 @@ public class CompilerTests
     [Fact]
     public void Matches()
     {
-        var filter = Compile<SampleStruct>("first matches \"^[0-9a-z]*_\\s+(a){1,2}$\"");
+        var filter = Compile<SampleStruct>("first =~ \"^[0-9a-z]*_\\s+(a){1,2}$\"");
         Assert.False(filter(new SampleStruct { FirstName = "" }));
         Assert.True(filter(new SampleStruct { FirstName = "_ a" }));
         Assert.True(filter(new SampleStruct { FirstName = "a0b1c2_  \taa" }));
         Assert.False(filter(new SampleStruct { FirstName = "a0b1c2_  aaa" }));
         Assert.False(filter(new SampleStruct { FirstName = "a__ \ta" }));
+    }
+
+    [Fact]
+    public void NestedQueryOperator()
+    {
+        var filter = Compile<SampleStruct>("list any { number > 3 }");
+        Assert.True(filter(
+            new SampleStruct
+            {
+                List = new()
+                {
+                    new StructField { NumberOfBananas = 0 },
+                    new StructField { NumberOfBananas = 0 },
+                    new StructField { NumberOfBananas = 4 },
+                }
+            }));
+
+        Assert.False(filter(
+            new SampleStruct
+            {
+                List = new()
+                {
+                    new StructField { NumberOfBananas = 0 },
+                    new StructField { NumberOfBananas = 0 },
+                    new StructField { NumberOfBananas = 2 },
+                }
+            }));
     }
 
     [Fact]

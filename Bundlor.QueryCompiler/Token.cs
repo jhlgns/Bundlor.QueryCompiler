@@ -13,18 +13,29 @@ internal enum TokenKind
     GreaterThan,
     GreaterThanOrEqual,
 
+    // String matching
+    MatchesRegex,
+    DoesNotMatchRegex,
+    Like,
+    NotLike,
+
     // Logical
     And,
     Or,
+    Not,
 
     // Arithmetical
     Plus,
-    Minus,  // Also unary
+    Minus,
     Multiply,
     Divide,
-
-    // Unary
-    Not,
+    Modulo,
+    BitAnd,
+    BitOr,
+    BitXor,
+    BitNot,
+    LeftShift,
+    RightShift,
 
     // Other
     Identifier,
@@ -116,61 +127,66 @@ internal readonly struct Token
 
 internal record class BinaryOperatorInfo(
     string Operator,
-    string Alternate,
     TokenKind TokenKind,
-    ExpressionType ExpressionType,
+    ExpressionType? ExpressionType,
+    MethodInfo? Method,
     int Precedence);
 
-// TODO(jh) Alternate
 internal record class UnaryOperatorInfo(
     char Operator,
     TokenKind TokenKind,
     ExpressionType ExpressionType);
 
-internal record class SpecialBinaryOperatorInfo(
-    string Operator,
-    MethodInfo Method);
-
 internal static class TokenConstants
 {
+    // TODO(jh) What do we need the TokenKind for in the BinaryOperatorInfo???
+    //  Could we not just make the token kind = 'operator'?
+
+    // NOTE(jh) https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/#operator-precedence
+    // NOTE(jh) Must be sorted by operator length so the scanner does not early-out when trying to match the text.
     public static readonly BinaryOperatorInfo[] BinaryOperators = new BinaryOperatorInfo[]
     {
-        new("*", "mul", TokenKind.Multiply, ExpressionType.Multiply, 120),
-        new("/", "div", TokenKind.Divide, ExpressionType.Divide, 120),
+        new("*", TokenKind.Multiply, ExpressionType.Multiply, null, 100),
+        new("/", TokenKind.Divide, ExpressionType.Divide, null, 100),
+        new("%", TokenKind.Modulo, ExpressionType.Modulo, null, 100),
 
-        new("+", "add", TokenKind.Plus, ExpressionType.Add, 110),
-        new("-", "sub", TokenKind.Minus, ExpressionType.Subtract, 110),
+        new("+", TokenKind.Plus, ExpressionType.Add, null, 90),
+        new("-", TokenKind.Minus, ExpressionType.Subtract, null, 90),
 
-        new("==", "eq", TokenKind.Equal, ExpressionType.Equal, 100),
-        new("!=", "ne", TokenKind.NotEqual, ExpressionType.NotEqual, 100),
+        new("<<", TokenKind.LeftShift, ExpressionType.LeftShift, null, 80),
+        new(">>", TokenKind.RightShift, ExpressionType.RightShift, null, 80),
 
-        // NOTE(jh) 'XXXOrEqual' must come before XXX for the scanner to work
-        new("<=", "le", TokenKind.LessThanOrEqual, ExpressionType.LessThanOrEqual, 90),
-        new("<", "lt", TokenKind.LessThan, ExpressionType.LessThan, 90),
-        new(">=", "ge", TokenKind.GreaterThanOrEqual, ExpressionType.GreaterThanOrEqual, 90),
-        new(">", "gt", TokenKind.GreaterThan, ExpressionType.GreaterThan, 90),
+        new("<", TokenKind.LessThan, ExpressionType.LessThan, null, 70),
+        new(">", TokenKind.GreaterThan, ExpressionType.GreaterThan, null, 70),
+        new("<=", TokenKind.LessThanOrEqual, ExpressionType.LessThanOrEqual, null, 70),
+        new(">=", TokenKind.GreaterThanOrEqual, ExpressionType.GreaterThanOrEqual, null, 70),
 
-        new("&&", "and", TokenKind.And, ExpressionType.And, 80),
+        new("==", TokenKind.Equal, ExpressionType.Equal, null, 60),
+        new("!=", TokenKind.NotEqual, ExpressionType.NotEqual, null, 60),
+        new("=?", TokenKind.Like, null, GetBinaryMethod("Like"), 60),
+        new("!?", TokenKind.NotLike, null, GetBinaryMethod("NotLike"), 60),
+        new("=~", TokenKind.MatchesRegex, null, GetBinaryMethod("MatchesRegex"), 60),
+        new("!~", TokenKind.DoesNotMatchRegex, null, GetBinaryMethod("DoesNotMatchRegex"), 60),
 
-        new("||", "or", TokenKind.Or, ExpressionType.Or, 70),
-    };
+        new("&", TokenKind.BitAnd, ExpressionType.And, null, 40),
+
+        new("^", TokenKind.BitXor, ExpressionType.ExclusiveOr, null, 30),
+
+        new("|", TokenKind.BitOr, ExpressionType.Or, null, 20),
+
+        new("&&", TokenKind.And, ExpressionType.AndAlso, null, 10),
+
+        new("||", TokenKind.Or, ExpressionType.OrElse, null, 0),
+    }.OrderByDescending(x => x.Operator.Length).ToArray();
+
+    private static MethodInfo GetBinaryMethod(string name) =>
+        typeof(SpecialBinaryOperatorFunctions).GetMethod(name)!;
 
     private static readonly UnaryOperatorInfo[] UnaryOperators = new UnaryOperatorInfo[]
     {
         new('-', TokenKind.Minus, ExpressionType.Negate),
         new('!', TokenKind.Not, ExpressionType.Not),
-        //new('~', TokenKind.BitwiseNot, ExpressionType.Not),  // TODO(jh) Make this also a string match operator
-    };
-
-    private static readonly SpecialBinaryOperatorInfo[] SpecialBinaryOperators = new SpecialBinaryOperatorInfo[]
-    {
-        /*
-        new("older", typeof(SpecialBinaryOperatorFunctions).GetMethod("Older")!),
-        new("newer", typeof(SpecialBinaryOperatorFunctions).GetMethod("Newer")!),
-        */
-        new("like", typeof(SpecialBinaryOperatorFunctions).GetMethod("Like")!),
-        //new("ilike", typeof(SpecialBinaryOperatorFunctions).GetMethod("Ilike")!),
-        new("matches", typeof(SpecialBinaryOperatorFunctions).GetMethod("Matches")!),
+        new('~', TokenKind.BitNot, ExpressionType.Not),
     };
 
     public static readonly string[] NestedQueryOperators = new[] { "any", "all" };
@@ -178,14 +194,5 @@ internal static class TokenConstants
     public static BinaryOperatorInfo? TryGetBinaryOperatorInfo(TokenKind tokenKind) =>
         BinaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);
 
-    public static BinaryOperatorInfo? TryGetBinaryOperatorInfoByAlternate(string value) =>
-        BinaryOperators.FirstOrDefault(x =>
-            x.Alternate.Equals(value, StringComparison.OrdinalIgnoreCase));
-
     public static UnaryOperatorInfo? TryGetUnaryOperatorInfo(TokenKind tokenKind) =>
-        UnaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);
-
-    public static SpecialBinaryOperatorInfo? TryGetSpecialOperatorInfo(string text) =>
-        SpecialBinaryOperators.FirstOrDefault(x =>
-            x.Operator.Equals(text, StringComparison.OrdinalIgnoreCase));
-}
+        UnaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);}

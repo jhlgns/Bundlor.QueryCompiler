@@ -154,25 +154,6 @@ public class ScannerTests
         AssertTokensMeetExpectations(query, expectations);
     }
 
-    [Fact]
-    public void BinaryOperatorAlternate()
-    {
-        AssertTokensMeetExpectations(
-            "eq NE le lt ge gt AND Or",
-            new TokenExpectation[]
-            {
-                new(TK.Equal, "eq"),
-                new(TK.NotEqual, "NE"),
-                new(TK.LessThanOrEqual, "le"),
-                new(TK.LessThan, "lt"),
-                new(TK.GreaterThanOrEqual, "ge"),
-                new(TK.GreaterThan, "gt"),
-                new(TK.And, "AND"),
-                new(TK.Or, "Or"),
-                new(TK.EndOfFile, ""),
-            });
-    }
-
     [Theory]
     [InlineData("\"unterminated string")]
     [InlineData("' unexpected character")]
