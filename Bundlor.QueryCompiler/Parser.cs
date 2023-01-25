@@ -1,18 +1,30 @@
-﻿using System.Collections.Generic;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Linq.Expressions;
 using System.Reflection;
 using static Bundlor.QueryCompiler.TokenConstants;
 
 namespace Bundlor.QueryCompiler;
 
-internal record ParserContext(
-    int Depth,
-    Dictionary<string, MemberInfo> Members,
-    ParameterExpression InputParameter);
+// TODO(jh) Make StringComparison and memer shortcut expansion configurable
 
-// TODO(jh) Array indexing
-// TODO(jh) Member access
+internal class ParserContext
+{
+    public ParserContext(ParserContext? parentContext, Type type, ParameterExpression inputParameter)
+    {
+        Depth = (parentContext?.Depth + 1) ?? 0;
+        ParentContext = parentContext;
+        Members = GetMembers(type).ToList();
+        InputParameter = inputParameter;
+    }
+
+    public readonly int Depth;
+    public readonly ParserContext? ParentContext;
+    public readonly List<MemberInfo> Members;
+    public readonly ParameterExpression InputParameter;
+
+    public static IEnumerable<MemberInfo> GetMembers(Type type) =>
+        type.GetProperties().Cast<MemberInfo>().Concat(type.GetFields());
+}
 
 internal class Parser
 {
@@ -25,33 +37,13 @@ internal class Parser
     internal Expression ParseExpression(int previousPrecendence = int.MinValue)
     {
         var left = ParsePrimaryExpression();
+        left = ParseSuffixExpression(left);
 
         while (true)
         {
             if (_scanner.TryPop(TokenKind.NestedQueryOperator) is { } token)
             {
-                _scanner.Require(TokenKind.BlockOpen);
-
-                // TODO(jh) Make function for this
-
-                var elementType = left.Type.GetInterfaces()
-                    .FirstOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-                    ?.GetGenericArguments()?.Single()
-                    ?? throw new InvalidOperationException($"{left.Type} is not a subclass of IEnumerable<>");
-                var filterExpression = QueryCompiler.CompileFilterExpression(elementType, _scanner, _context.Depth + 1);
-                var enumerableType = typeof(IEnumerable<>).MakeGenericType(elementType);
-                var lambdaParameterType = typeof(Func<,>).MakeGenericType(elementType, typeof(bool));
-                var method = token.Text.ToLower() switch
-                {
-                    "any" => typeof(Enumerable).GetMethod("Any", BindingFlags.Static, new[] { enumerableType, lambdaParameterType })!,
-                    "all" => typeof(Enumerable).GetMethod("All", BindingFlags.Static, new[] { enumerableType, lambdaParameterType })!,
-                    _ => throw new InvalidOperationException($"Could not find nested query operator function for {token.Text}"),
-                };
-
-                _scanner.Require(TokenKind.BlockClose);
-
-                left = Expression.Call(left, method, filterExpression);
-
+                left = ParseNestedQueryExpression(token, left);
                 continue;
             }
 
@@ -75,14 +67,80 @@ internal class Parser
         }
     }
 
+    private Expression ParseNestedQueryExpression(Token token, Expression left)
+    {
+        _scanner.Require(TokenKind.BlockOpen);
+
+        var elementType = left.Type.GetInterfaces()
+            .FirstOrDefault(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            ?.GetGenericArguments()?.Single()
+            ?? throw new InvalidOperationException($"{left.Type} does not implement IEnumerable<>");
+        var filterExpression = QueryCompiler.CompileFilterExpression(elementType, _scanner, _context);
+        var enumerableType = typeof(IEnumerable<>).MakeGenericType(elementType);
+        var predicateType = typeof(Func<,>).MakeGenericType(elementType, typeof(bool));
+        var method = token.Text.ToLower() switch
+        {
+            "any" => typeof(Enumerable).GetMethods()
+                .First(x => x.Name == "Any" && x.GetParameters().Length == 2 && x.IsGenericMethod && x.GetGenericArguments().Length == 1)
+                .MakeGenericMethod(elementType)!,
+            "all" => typeof(Enumerable).GetMethods()
+                .First(x => x.Name == "All" && x.GetParameters().Length == 2 && x.IsGenericMethod && x.GetGenericArguments().Length == 1)
+                .MakeGenericMethod(elementType)!,
+            "count" => typeof(Enumerable).GetMethods()
+                .First(x => x.Name == "Count" && x.GetParameters().Length == 2 && x.IsGenericMethod && x.GetGenericArguments().Length == 1)
+                .MakeGenericMethod(elementType)!,
+            _ => throw new InvalidOperationException($"Could not find nested query operator function for {token.Text}"),
+        };
+
+        _scanner.Require(TokenKind.BlockClose);
+
+        return Expression.Call(method, left, filterExpression);
+    }
+
+    private Expression ParseSuffixExpression(Expression left)
+    {
+        if (_scanner.TryPop(TokenKind.Dot) != null)
+        {
+            var memberIdentifier = _scanner.Require(TokenKind.Identifier);
+            var memberInfo = FindMemberInfo(_scanner, ParserContext.GetMembers(left.Type), memberIdentifier);
+            return ParseSuffixExpression(Expression.MakeMemberAccess(left, memberInfo));
+        }
+
+        // TODO(jh) Array access
+
+        return left;
+    }
+
     private Expression ParsePrimaryExpression()
     {
         var token = _scanner.Pop();
         switch (token.Kind)
         {
             case TokenKind.Identifier:
-                var memberInfo = GetMemberInfo(token);
+                if (token.Text.Equals("@now", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Expression.Constant(DateTime.Now);
+                }
+
+                var memberInfo = FindMemberInfo(_scanner, _context.Members, token);
                 return Expression.MakeMemberAccess(_context.InputParameter, memberInfo);
+
+            case TokenKind.IteratorVariable:
+                // $ is the current iterator variable, $$ is the parent, ...
+                var context = _context;
+                for (int i = 1; i < token.Text.Length; ++i)
+                {
+                    if (_context.ParentContext == null)
+                    {
+                        _scanner.ThrowError(
+                            token,
+                            $"Iterator variable of depth {token.Text.Length} exceeds the current expression depth of {i}");
+                    }
+
+                    context = _context.ParentContext;
+                }
+
+                return context.InputParameter;
 
             case TokenKind.Literal:
                 return Expression.Constant(token.LiteralValue!.Value.Opaque);
@@ -100,32 +158,37 @@ internal class Parser
                 return Expression.MakeUnary(operatorInfo.ExpressionType, ParseExpression(), null!);
 
             default:
-                _scanner.ThrowError(token.Start, $"Invalid expression token {token.Kind}");
+                _scanner.ThrowError(token, $"Invalid expression token {token.Kind}");
                 break;
         }
 
         throw new();
     }
 
-    private MemberInfo GetMemberInfo(Token token)
+    private static MemberInfo FindMemberInfo(Scanner scanner, IEnumerable<MemberInfo> members, Token token)
     {
-        if (_context.Members.TryGetValue(token.Text, out var memberInfo))
+        Debug.Assert(token.Kind == TokenKind.Identifier);
+        Debug.Assert(token.Text.Length >= 1);
+
+        var memberInfo = members.FirstOrDefault(x => x.Name.Equals(token.Text, StringComparison.OrdinalIgnoreCase));
+        if (memberInfo != null)
             return memberInfo;
 
-        // TODO(jh) Unify the StringComparison types everywhere
-        var shortcutPossibilities = _context.Members
-            .Where(x => x.Key.StartsWith(token.Text, StringComparison.OrdinalIgnoreCase))
+        var shortcutPossibilities = members
+            .Where(x => x.Name.StartsWith(token.Text, StringComparison.OrdinalIgnoreCase))
             .ToArray();
 
         if (shortcutPossibilities.Length == 0)
-            _scanner.ThrowError(token.Start, $"Member '{token.Text}' not found");
+            scanner.ThrowError(token, $"Member '{token.Text}' not found");
 
         if (shortcutPossibilities.Length > 1)
         {
-            var possibilityEnumeration = string.Join(", ", shortcutPossibilities.Select(x => x.Key));
-            _scanner.ThrowError(token.Start, $"'{token.Text}' is ambiguous: {possibilityEnumeration}");
+            var head = shortcutPossibilities.Take(shortcutPossibilities.Length - 1).Select(x => $"'{x.Name}'");
+            var last = $"'{shortcutPossibilities.Last().Name}'";
+            var possibilityEnumeration = $"{string.Join(", ", head)} or {last}";
+            scanner.ThrowError(token, $"'{token.Text}' is ambiguous: could be {possibilityEnumeration}");
         }
 
-        return shortcutPossibilities[0].Value;
+        return shortcutPossibilities[0];
     }
 }

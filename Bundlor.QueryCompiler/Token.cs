@@ -39,9 +39,9 @@ internal enum TokenKind
 
     // Other
     Identifier,
-    SpecialIdentifier,  // like '@now'
-    SpecialBinaryOperator,  // like 'matches'
-    NestedQueryOperator,  // like 'any'
+    IteratorVariable,
+    Dot,
+    NestedQueryOperator,
     Literal,
     ParenthesisOpen,
     ParenthesisClose,
@@ -189,7 +189,7 @@ internal static class TokenConstants
         new('~', TokenKind.BitNot, ExpressionType.Not),
     };
 
-    public static readonly string[] NestedQueryOperators = new[] { "any", "all" };
+    public static readonly string[] NestedQueryOperators = new[] { "any", "all", "count" };
 
     public static BinaryOperatorInfo? TryGetBinaryOperatorInfo(TokenKind tokenKind) =>
         BinaryOperators.FirstOrDefault(x => x.TokenKind == tokenKind);

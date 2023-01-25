@@ -7,6 +7,8 @@ public class ParserTests
 {
     private record TestRecord(bool A, bool B, bool C, bool D, bool E, bool F);
     private record ShortcutTest(int Apples, double Bananas, string Password, string Path);
+    private record SomethingWithIntList(int Value, List<int> Integers);
+    private record SomethingWithDateTime(DateTime CreatedAt);
 
     private static Expression Simplify(Expression expression)
     {
@@ -254,7 +256,7 @@ public class ParserTests
         {
             Left: MethodCallExpression
             {
-                Method: { Name: nameof(SpecialBinaryOperatorFunctions.Like) },
+                Method.Name: nameof(SpecialBinaryOperatorFunctions.Like),
                 Arguments:
                 [
                     ParameterExpression { Name: "Path" },
@@ -270,7 +272,7 @@ public class ParserTests
                     ParameterExpression { Name: "Path" },
                     ParameterExpression { Name: "Password" },
                 ]
-            }
+            },
         };
 
         Assert.True(isCorrect);
@@ -297,10 +299,77 @@ public class ParserTests
                 Left: ParameterExpression { Name: "Password" },
                 NodeType: ExpressionType.Equal,
                 Right: ConstantExpression { Value: "c0w4bung4" },
-
-            }
+            },
         };
 
+        Assert.True(isCorrect);
+    }
+
+    [Fact]
+    public void IteratorVariable()
+    {
+        var expression = CompileFilterExpression<int>("$ == 2023").Body;
+        var isCorrect = expression is BinaryExpression
+        {
+            Left: ParameterExpression { Name: "it0" },
+            NodeType: ExpressionType.Equal,
+            Right: ConstantExpression { Value: 2023 },
+        };
+        Assert.True(isCorrect);
+
+        Assert.Equal(
+            CompileFilterExpression<TestRecord>("$.a").Body.ToString(),
+            CompileFilterExpression<TestRecord>("a").Body.ToString());
+
+        var ex = Assert.Throws<QueryCompilationException>(() =>
+            CompileFilterExpression<int>("$$ == 2023"));
+        Assert.Contains("depth", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NestedIteratorVariable()
+    {
+        // it0 => it0.Integers.Any((int it1) => it1 == it0.Value)
+        var expression = CompileFilterExpression<SomethingWithIntList>("integers any { $ == $$.value }").Body;
+        var isCorrect = expression is MethodCallExpression
+        {
+            Method.Name: "Any",
+            Arguments:
+            [
+                MemberExpression
+                {
+                    Expression: ParameterExpression { Name: "it0" },
+                    Member.Name: "Integers",
+                },
+                LambdaExpression
+                {
+                    Parameters: [ ParameterExpression { Type.Name: "Int32" , Name: "it1" } ],
+                    Body: BinaryExpression
+                    {
+                        Left: ParameterExpression { Name: "it1" },
+                        NodeType: ExpressionType.Equal,
+                        Right: MemberExpression
+                        {
+                            Expression: ParameterExpression { Name: "it0" },
+                            Member.Name: "Value",
+                        }
+                    },
+                },
+            ]
+        };
+        Assert.True(isCorrect);
+    }
+
+    [Fact]
+    public void Now()
+    {
+        var expression = Simplify(CompileFilterExpression<SomethingWithDateTime>("createdat == @now"));
+        var isCorrect = expression is BinaryExpression
+        {
+            Left: ParameterExpression { Name: "CreatedAt" },
+            NodeType: ExpressionType.Equal,
+            Right: ConstantExpression { Value: DateTime d }
+        } && DateTime.Now - d < TimeSpan.FromMilliseconds(10);
         Assert.True(isCorrect);
     }
 

@@ -1,4 +1,5 @@
-﻿using System.Linq.Expressions;
+﻿using System.Diagnostics;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Bundlor.QueryCompiler;
@@ -56,22 +57,21 @@ public static class QueryCompiler
     internal static Expression<Func<T, bool>> CompileFilterExpression<T>(string query)
     {
         var scanner = new Scanner(query);
-        var result = CompileFilterExpression(typeof(T), scanner, 0);
+        var result = CompileFilterExpression(typeof(T), scanner, null);
 
         scanner.EnsureEofReached();
 
         return (Expression<Func<T, bool>>)result;
     }
 
-    internal static LambdaExpression CompileFilterExpression(Type type, Scanner scanner, int depth)
+    internal static LambdaExpression CompileFilterExpression(
+        Type type,
+        Scanner scanner,
+        ParserContext? parentContext)
     {
-        var members = type.GetProperties()
-            .Cast<MemberInfo>()
-            .Concat(type.GetFields())
-            .ToDictionary(x => x.Name, StringComparer.OrdinalIgnoreCase);
-        var inputParameter = Expression.Parameter(type, $"x{depth}");
+        var inputParameter = Expression.Parameter(type, $"it{(parentContext?.Depth + 1) ?? 0}");
 
-        var parser = new Parser(scanner, new ParserContext(depth, members, inputParameter));
+        var parser = new Parser(scanner, new ParserContext(parentContext, type, inputParameter));
 
         var filterExpression = parser.ParseExpression();
 

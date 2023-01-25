@@ -27,6 +27,7 @@ public class CompilerTests
         public bool NamesAreDifficult;
         public bool Flagged { get; set; }
         public StructField Record;
+        public DateTime LastCheckup { get; set; }
         public List<StructField> List;
     }
 
@@ -137,42 +138,38 @@ public class CompilerTests
             });
     }
 
-    public static IEnumerable<object[]> ComparisonCases() =>
-        new object[][]
-        {
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt == 123", true },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt == 729", false },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt != 0",   true },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt != 123", false },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt > -100", true },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt >  123", false },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt >= 123", true },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt >= 124", false },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt < 9999", true },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt <  123", false },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt <= 123", true },
-            new object[] { new SampleStruct { LoginAttempts = 123 }, "loginatt <= 122", false },
-            new object[]
-            {
-                new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
-                """first == "jan" && loginatt >= 122""",
-                true,
-            },
-            new object[]
-            {
-                new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
-                """first != "jan" && loginatt < 122""",
-                false,
-            },
-        };
-
-    [Theory]
-    [MemberData(nameof(ComparisonCases))]
-    public void ComparisonOperators(SampleStruct record, string query, bool expectedFilterResult)
+    [Fact]
+    public void ComparisonOperators()
     {
-        var filter = Compile<SampleStruct>(query);
-        var filterResult = filter(record);
-        Assert.Equal(expectedFilterResult, filterResult);
+        void AssertFilterResultEquals(SampleStruct record, string query, bool expectedFilterResult)
+        {
+            var filter = Compile<SampleStruct>(query);
+            var filterResult = filter(record);
+            Assert.Equal(expectedFilterResult, filterResult);
+        }
+
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt == 123", true);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt == 729", false);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt != 0", true);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt != 123", false);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt > -100", true);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt >  123", false);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt >= 123", true);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt >= 124", false);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt < 9999", true);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt <  123", false);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt <= 123", true);
+        AssertFilterResultEquals(new SampleStruct { LoginAttempts = 123 }, "loginatt <= 122", false);
+
+        AssertFilterResultEquals(
+            new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
+            """first == "jan" && loginatt >= 122""",
+            true);
+
+        AssertFilterResultEquals(
+            new SampleStruct { LoginAttempts = 1234, FirstName = "jan" },
+            """first != "jan" && loginatt < 122""",
+            false);
     }
 
     [Fact]
@@ -180,7 +177,7 @@ public class CompilerTests
     {
         // TODO(jh) Make it so that if the last token was a special string operator
         // the next token gets interpreted as a string literal until the next whitespace (?)
-        var filter = Compile<SampleStruct>("first =? \"*n\" || last =? \"k*a*\"");
+        var filter = Compile<SampleStruct>("first =? \"*n\" || lastn =? \"k*a*\"");
         Assert.True(filter(new SampleStruct { FirstName = "jan" }));
         Assert.True(filter(new SampleStruct { FirstName = "jahn" }));
         Assert.False(filter(new SampleStruct { FirstName = "jam" }));
@@ -201,7 +198,7 @@ public class CompilerTests
     }
 
     [Fact]
-    public void NestedQueryOperator()
+    public void Any()
     {
         var filter = Compile<SampleStruct>("list any { number > 3 }");
         Assert.True(filter(
@@ -228,12 +225,67 @@ public class CompilerTests
     }
 
     [Fact]
+    public void Count()
+    {
+        var filter = Compile<SampleStruct>("list count { number == 420 } == 2");
+        Assert.True(filter(
+            new SampleStruct
+            {
+                List = new()
+                {
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 1337 },
+                }
+            }));
+
+        Assert.False(filter(
+            new SampleStruct
+            {
+                List = new()
+                {
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 1337 },
+                    new StructField { NumberOfBananas = 1337 },
+                }
+            }));
+    }
+
+    [Fact]
+    public void All()
+    {
+        var filter = Compile<SampleStruct>("list all { number == 420 }");
+        Assert.True(filter(
+            new SampleStruct
+            {
+                List = new()
+                {
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 420 },
+                }
+            }));
+
+        Assert.False(filter(
+            new SampleStruct
+            {
+                List = new()
+                {
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 420 },
+                    new StructField { NumberOfBananas = 1337 },
+                }
+            }));
+    }
+
+    [Fact]
     public void AllInOne()
     {
         // TODO(jh)
         // Enough poking around! Let's do one where all the features are combined
         // in one query.
         // This query should feature:
+        // * All binary and unary operators
         // * Binary operator precedence
         // * Parenthesis
         // * Comparisons
@@ -243,6 +295,30 @@ public class CompilerTests
         // * Member comparison (with each other, not only literals)
         // * Nested query operators
         // * Special binary operators (string match/regex & DateTime)
-        // * Unary operators
+
+        var sample = new SampleStruct
+        {
+            FirstName = "George",
+            LastName = "Kollias",
+            LoginAttempts = 234,
+            NumberOfTeeth = 28,
+            CoolnessFactor = 0.999,
+            WordsPerMinute = 50,
+            NamesAreDifficult = true,
+            Flagged = false,
+            Record = new() { NumberOfBananas = 12, EatPercent = 0.3 },
+            LastCheckup = new DateTime(2022, 12, 01),
+            List = new List<StructField>() { new() { NumberOfBananas = 987, EatPercent = 1.0 } },
+        };
+
+        var filter = CompileFilterExpression<SampleStruct>("""
+            first =? "georg*" && LASTN =~ "[KC]ol(l?)ia." ||
+            loginattempts > numberofteeth ||
+            coolness > 0.7 &&
+            (NamesAreDifficult && ((numberofteeth & 1) == 0)) != Flagged &&
+            (rec.num == 12 && $.rec.e < .5) &&
+            @now - lastcheck > 5:00:00:00 &&
+            list all { number > $$.loginatt }
+            """);
     }
 }
