@@ -36,7 +36,7 @@ public class ParserTests
         if (expression is MemberExpression member)
         {
             // Here is the simplification: convert MemberExpressions ("x0.Field")
-            // to a ParameterExpression (just "Field") to that the tests are easier
+            // to a ParameterExpression (just "Field") so that the tests are easier
             // to read and write.
             return Expression.Parameter(member.Type, member.Member.Name);
         }
@@ -266,7 +266,7 @@ public class ParserTests
             NodeType: ExpressionType.OrElse,
             Right: MethodCallExpression
             {
-                Method: { Name: nameof(SpecialBinaryOperatorFunctions.MatchesRegex) },
+                Method.Name: nameof(SpecialBinaryOperatorFunctions.MatchesRegex),
                 Arguments:
                 [
                     ParameterExpression { Name: "Path" },
@@ -281,8 +281,6 @@ public class ParserTests
     [Fact]
     public void CaseInsensitiveShortcuts()
     {
-        // TODO(jh) Nested shortcuts for member access
-
         var expression = Simplify(
             CompileFilterExpression<ShortcutTest>("a != 0 || paSS == \"c0w4bung4\""));
         var isCorrect = expression is BinaryExpression

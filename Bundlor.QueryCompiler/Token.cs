@@ -163,6 +163,9 @@ internal static class TokenConstants
 
         new("==", TokenKind.Equal, ExpressionType.Equal, null, 60),
         new("!=", TokenKind.NotEqual, ExpressionType.NotEqual, null, 60),
+
+        // TODO(jh) I really want to make text-based alternates for this (a like "*.dll" or
+        // a matches "\w+\s\w")
         new("=?", TokenKind.Like, null, GetBinaryMethod("Like"), 60),
         new("!?", TokenKind.NotLike, null, GetBinaryMethod("NotLike"), 60),
         new("=~", TokenKind.MatchesRegex, null, GetBinaryMethod("MatchesRegex"), 60),

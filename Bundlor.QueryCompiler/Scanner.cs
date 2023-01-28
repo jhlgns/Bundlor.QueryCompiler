@@ -180,18 +180,18 @@ internal class Scanner
                     return MakeToken(TokenKind.Literal, doubleString, new LiteralValue() { DoubleValue = doubleValue });
 
                 case ':':
+                    // TODO(jh) Parse TimeSpan literal
+                    // dd.HH:mm:ss.ffff
                     var first = Cut();
                     if (char.IsNumber(Current))
                         ThrowError(_currentTokenStart, _position, "Malformed timespan");
 
                     throw new NotImplementedException();
-                // ((00:(00:(00:00)?)?).0000?)
-                // TODO(jh) Parse TimeSpan literal
 
                 case '/':
+                    // TODO(jh) Parse DateTime literal
+                    // yyyy/MM/dd
                     throw new NotImplementedException();
-                // yyyy/MM/dd
-                // TODO(jh) Parse DateTime literal
 
                 default:
                     var intString = Cut();
@@ -275,6 +275,7 @@ internal class Scanner
         throw new();
     }
 
+    /*
     // 3h40m10s1234
     private TimeSpan? ParseTimeSpan(string input, int position, out int end)
     {
@@ -305,6 +306,7 @@ internal class Scanner
                 }
         };
     }
+    */
 
     // TODO(jh) text could be replaced by doing Cut() here, right?
     private Token MakeToken(TokenKind kind, string text, LiteralValue? literalValue = null) =>

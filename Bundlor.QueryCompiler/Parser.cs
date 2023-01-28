@@ -5,7 +5,7 @@ using static Bundlor.QueryCompiler.TokenConstants;
 
 namespace Bundlor.QueryCompiler;
 
-// TODO(jh) Make StringComparison and memer shortcut expansion configurable
+// TODO(jh) Make StringComparison and automatic member expansion configurable
 
 internal class ParserContext
 {
@@ -153,7 +153,7 @@ internal class Parser
 
             case TokenKind.Minus:
             case TokenKind.Not:
-                //case TokenKind.BitwiseNot:
+            case TokenKind.BitNot:
                 var operatorInfo = TryGetUnaryOperatorInfo(token.Kind)!;
                 return Expression.MakeUnary(operatorInfo.ExpressionType, ParseExpression(), null!);
 

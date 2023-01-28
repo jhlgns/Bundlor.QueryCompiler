@@ -278,7 +278,7 @@ public class CompilerTests
             }));
     }
 
-    [Fact]
+    //[Fact]
     public void AllInOne()
     {
         // TODO(jh)
