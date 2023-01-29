@@ -87,6 +87,13 @@ internal readonly struct LiteralValue
         init => _timeSpanValue = value;
     }
 
+    private readonly DateTime? _dateTimeValue;
+    public DateTime? DateTimeValue
+    {
+        get => _dateTimeValue ?? throw new InvalidOperationException();
+        init => _dateTimeValue = value;
+    }
+
     public object Opaque
     {
         get
@@ -95,7 +102,8 @@ internal readonly struct LiteralValue
             if (_intValue != null) return _intValue;
             if (_doubleValue != null) return _doubleValue;
             if (_boolValue != null) return _boolValue;
-            if (_timeSpanValue != null) return _timeSpanValue;  // TODO(jh) Might not be compatible with Expression.Constant()
+            if (_timeSpanValue != null) return _timeSpanValue;
+            if (_dateTimeValue != null) return _dateTimeValue;
             throw new InvalidOperationException();
         }
     }
@@ -121,6 +129,7 @@ internal readonly struct Token
     public double DoubleValue => LiteralValue!.Value.DoubleValue!.Value;
     public bool BoolValue => LiteralValue!.Value.BoolValue!.Value;
     public TimeSpan TimeSpanValue => LiteralValue!.Value.TimeSpanValue!.Value;
+    public DateTime DateTimeValue => LiteralValue!.Value.DateTimeValue!.Value;
 
     public override string ToString() => Text;
 }

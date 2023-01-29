@@ -16,32 +16,38 @@ public class QueryCompilationException : Exception
 
 internal class Scanner
 {
-    public Scanner(string input) => _input = input.Replace("\r", "");
-    public Scanner(Scanner other)
-    {
-        _input = other._input;
-        _position = other._position;
-        _currentTokenStart = other._currentTokenStart;
-        _currentLine = other._currentLine;
-        EofReached = other.EofReached;
-    }
+    public Scanner(string input) => _input = input.ReplaceLineEndings("\n");
 
     private readonly string _input;
     private int _position;
     private int _currentTokenStart;
-    private int _currentLine;
-    public bool EofReached { private set; get; }
 
     private char this[int index] => index < _input.Length ? _input[index] : '\0';
     private char Current => this[_position];
-    private void Next() => ++_position;
-    private string Cut() => _input.Substring(_currentTokenStart, _position - _currentTokenStart);
-
-    public Token Peek()
+    private void EatChar() => ++_position;
+    private void UnEatChar() => --_position;
+    private bool EatChar(char c)
     {
-        var copy = new Scanner(this);
-        return copy.Pop();
+        if (Current == c)
+        {
+            EatChar();
+            return true;
+        }
+
+        return false;
     }
+
+    private string Cut() => Cut(_currentTokenStart);
+    private string Cut(int start) => _input.Substring(start, _position - start);
+
+    private Scanner Clone()
+    {
+        var clone = new Scanner(_input);
+        clone._position = _position;
+        return clone;
+    }
+
+    public Token Peek() => Clone().Pop();
 
     public Token? TryPop(TokenKind kind)
     {
@@ -124,19 +130,17 @@ internal class Scanner
 
     public Token Pop()
     {
-        Debug.Assert(!EofReached);
-
         while (char.IsWhiteSpace(Current))
-            Next();
+            EatChar();
 
         _currentTokenStart = _position;
 
         // Identifier/special binary operator/boolean literal?
         if (char.IsLetter(Current) || Current == '_' || Current == '@')
         {
-            Next();
+            EatChar();
             while (char.IsLetter(Current) || char.IsNumber(Current) || Current == '_')
-                Next();
+                EatChar();
 
             var word = Cut();
 
@@ -151,11 +155,9 @@ internal class Scanner
             };
         }
 
-        if (Current == '$')
+        if (EatChar('$'))
         {
-            Next();
-            while (Current == '$')
-                Next();
+            while (EatChar('$')) ;
             var iteratorVariable = Cut();
             return MakeToken(TokenKind.IteratorVariable, iteratorVariable);
         }
@@ -163,54 +165,56 @@ internal class Scanner
         // Integer or floating point literal or just '.'?
         if (char.IsNumber(Current))
         {
-            Next();
-            while (char.IsNumber(Current))
-                Next();
-
-            switch (Current)
+            var clone = Clone();
+            if (clone.TryParseTimeSpan() is { } timeSpan)
             {
-                case '.':
-                    Next();
-                    while (char.IsNumber(Current))
-                        Next();
-
-                    var doubleString = Cut();
-                    var doubleValue = double.Parse(doubleString, CultureInfo.InvariantCulture);
-
-                    return MakeToken(TokenKind.Literal, doubleString, new LiteralValue() { DoubleValue = doubleValue });
-
-                case ':':
-                    // TODO(jh) Parse TimeSpan literal
-                    // dd.HH:mm:ss.ffff
-                    var first = Cut();
-                    if (char.IsNumber(Current))
-                        ThrowError(_currentTokenStart, _position, "Malformed timespan");
-
-                    throw new NotImplementedException();
-
-                case '/':
-                    // TODO(jh) Parse DateTime literal
-                    // yyyy/MM/dd
-                    throw new NotImplementedException();
-
-                default:
-                    var intString = Cut();
-                    var intValue = int.Parse(intString);  // TODO(jh) Try & error message
-
-                    return MakeToken(TokenKind.Literal, intString, new LiteralValue() { IntValue = intValue });
+                _position = clone._position;
+                return MakeToken(TokenKind.Literal, Cut(), new LiteralValue { TimeSpanValue = timeSpan });
             }
+
+            clone = Clone();
+            if (clone.TryParseDateTime() is { } dateTime)
+            {
+                _position = clone._position;
+                return MakeToken(TokenKind.Literal, Cut(), new LiteralValue { DateTimeValue = dateTime });
+            }
+
+            EatChar();
+            while (char.IsNumber(Current))
+                EatChar();
+
+            if (!EatChar('.'))
+            {
+                var intString = Cut();
+                if (!int.TryParse(intString, out var intValue))
+                {
+                    ThrowError(_currentTokenStart, _position, "Failed to parse integer");
+                }
+
+                return MakeToken(TokenKind.Literal, intString, new LiteralValue() { IntValue = intValue });
+            }
+
+            while (char.IsNumber(Current))
+                EatChar();
+
+            var doubleString = Cut();
+            if (!double.TryParse(doubleString, CultureInfo.InvariantCulture, out var doubleValue))
+            {
+                ThrowError(_currentTokenStart, _position, "Failed to floating point value");
+            }
+
+            return MakeToken(TokenKind.Literal, doubleString, new LiteralValue() { DoubleValue = doubleValue });
         }
 
 
         // Just '.' or '.123' floating point literal?
-        if (Current == '.')
+        if (EatChar('.'))
         {
-            Next();
             if (!char.IsNumber(Current))
                 return MakeToken(TokenKind.Dot, ".");
 
             while (char.IsNumber(Current))
-                Next();
+                EatChar();
 
             var doubleString = Cut();
             var doubleValue = double.Parse(doubleString, CultureInfo.InvariantCulture);
@@ -219,16 +223,15 @@ internal class Scanner
         }
 
         // String literal?
-        if (Current == '"')
+        if (EatChar('"'))
         {
-            Next();
             while (Current != '"' && Current != '\0')
-                Next();
+                EatChar();
 
             if (Current == '\0')
                 ThrowError(_currentTokenStart, _position - 1, "Unterminated string literal");
 
-            Next();
+            EatChar();
 
             var stringWithQuotes = Cut();
             return MakeToken(TokenKind.Literal, stringWithQuotes, new LiteralValue()
@@ -255,58 +258,149 @@ internal class Scanner
             return MakeToken(operatorInfo.TokenKind, Cut());
         }
 
-        switch (Current)
-        {
-            case '(': Next(); return MakeToken(TokenKind.ParenthesisOpen, "(");
-            case ')': Next(); return MakeToken(TokenKind.ParenthesisClose, ")");
-            case '{': Next(); return MakeToken(TokenKind.BlockOpen, "{");
-            case '}': Next(); return MakeToken(TokenKind.BlockClose, "}");
-            case '*': Next(); return MakeToken(TokenKind.Multiply, "*");
-            case '/': Next(); return MakeToken(TokenKind.Divide, "/");
-            case '+': Next(); return MakeToken(TokenKind.Plus, "+");
-            case '-': Next(); return MakeToken(TokenKind.Minus, "-");
-            case '!': Next(); return MakeToken(TokenKind.Not, "!");
-            //case '.': Next(); return MakeToken(TokenKind.Dot, ".");
-            case '~': Next(); return MakeToken(TokenKind.BitNot, "~");
-            case '\0': EofReached = true; return MakeToken(TokenKind.EndOfFile, "");
-            default: ThrowError(_currentTokenStart, _position, $"Unexpected character '{Current}'"); break;
-        }
+        if (EatChar('(')) return MakeToken(TokenKind.ParenthesisOpen, "(");
+        if (EatChar(')')) return MakeToken(TokenKind.ParenthesisClose, ")");
+        if (EatChar('{')) return MakeToken(TokenKind.BlockOpen, "{");
+        if (EatChar('}')) return MakeToken(TokenKind.BlockClose, "}");
+        if (EatChar('*')) return MakeToken(TokenKind.Multiply, "*");
+        if (EatChar('/')) return MakeToken(TokenKind.Divide, "/");
+        if (EatChar('+')) return MakeToken(TokenKind.Plus, "+");
+        if (EatChar('-')) return MakeToken(TokenKind.Minus, "-");
+        if (EatChar('!')) return MakeToken(TokenKind.Not, "!");
+        if (EatChar('~')) return MakeToken(TokenKind.BitNot, "~");
+        if (EatChar('\0')) return MakeToken(TokenKind.EndOfFile, "");
 
+        ThrowError(_currentTokenStart, _position, $"Unexpected character '{Current}'");
         throw new();
     }
 
-    /*
-    // 3h40m10s1234
-    private TimeSpan? ParseTimeSpan(string input, int position, out int end)
+    private int? ParseInt()
     {
-        end = position;
-
-        //var regex = new Regex(@"(\d+h?)(\d+m?)()");
-        if (!char.IsNumber(input[position]))
+        if (!char.IsNumber(Current))
             return null;
 
-        var start = position;
-        while (char.IsNumber(input[position]) && position < input.Length)
-            ++position;
+        var start = _position;
+        while (char.IsNumber(Current))
+            EatChar();
 
-        var quantifier = int.Parse(input.Substring(start, position - start));
-
-        switch (input[position])
+        if (!int.TryParse(Cut(start).TrimStart('0'), out var value))
         {
-            case 'h': return ParseTimeSpan(initial + TimeSpan.FromHours(quantifier), 'h', input, position, out end);
-            case 'm': return ParseTimeSpan(initial + TimeSpan.FromMinutes(quantifier), 'm', input, position, out end);
-            case 's': return ParseTimeSpan(initial + TimeSpan.FromSeconds(quantifier), 's', input, position, out end);
-            default:
-                switch (last)
-                {
-                    'h' => TimeSpan.FromMinutes(quantifier),
-                    'm' => TimeSpan.FromSeconds(quantifier),
-                    's' => TimeSpan.FromMilliseconds(quantifier),
-                    _ => ThrowError(start, position, "Malformed timespan"),
-                }
+            _position = start;
+            return null;
+        }
+
+        return value;
+    }
+
+    private TimeSpan? TryParseTimeSpan(bool allowDays = true)
+    {
+        // dd.HH:mm:ss.ffff
+        // Days, hours and milliseconds are optional
+
+        Debug.Assert(char.IsNumber(Current));
+
+        int? days = null;
+        Span<int?> colonSegments = stackalloc int?[3];
+        int numberOfColonSegments = 0;
+        int? milliseconds = null;
+
+        var done = false;
+        while (!done)  // TODO(jh) What about != '\0'?
+        {
+            if (ParseInt() is not { } value)
+            {
+                colonSegments[0] = null;
+                break;
+            }
+
+            switch (Current)
+            {
+                case '.':
+                    EatChar();
+
+                    // TODO(jh) Something is not right here!
+
+                    if (numberOfColonSegments == 0)
+                    {
+                    }
+
+                    if (days == null || !allowDays)
+                    {
+                        if (numberOfColonSegments != 0)
+                        {
+                            colonSegments[0] = null;
+                            done = true;
+                        }
+
+                        days = value;
+                        break;
+                    }
+
+                    // Milliseconds only make sense if there were at least minutes and seconds
+                    if (numberOfColonSegments < 2)
+                    {
+                        done = true;
+                        break;
+                    }
+
+                    milliseconds = value;
+                    done = true;
+                    break;
+
+                case ':':
+                    if (numberOfColonSegments == 3)
+                    {
+                        done = true;
+                        break;
+                    }
+
+                    colonSegments[numberOfColonSegments++] = value;
+                    EatChar();
+                    break;
+
+                default:
+                    done = true;
+                    break;
+            }
+        }
+
+        return colonSegments switch
+        {
+            [{ } hours, { } minutes, { } seconds] =>
+                new TimeSpan(days ?? 0, hours, minutes, seconds, milliseconds ?? 0),
+            [{ } minutes, { } seconds, null] =>
+                new TimeSpan(days ?? 0, 0, minutes, seconds, milliseconds ?? 0),
+            _ => (TimeSpan?)null,
         };
     }
-    */
+
+    private DateTime? TryParseDateTime()
+    {
+        // yyyy-MM-dd HH:mm:ss.fff
+        // Time is optional and if given, seconds and milliseconds are optional
+
+        var dateScanner = Clone();
+        if (
+            dateScanner.ParseInt() is not { } year  || !dateScanner.EatChar('-') ||
+            dateScanner.ParseInt() is not { } month || !dateScanner.EatChar('-') ||
+            dateScanner.ParseInt() is not { } day)
+            return null;
+
+        var result = new DateTime(year, month, day);
+
+        var timeOfDayScanner = dateScanner.Clone();
+        if (timeOfDayScanner.EatChar(' ') && timeOfDayScanner.TryParseTimeSpan(allowDays: false) is { } timeOfDay)
+        {
+            result += timeOfDay;
+            _position = timeOfDayScanner._position;
+        }
+        else
+        {
+            _position = dateScanner._position;
+        }
+
+        return result;
+    }
 
     // TODO(jh) text could be replaced by doing Cut() here, right?
     private Token MakeToken(TokenKind kind, string text, LiteralValue? literalValue = null) =>

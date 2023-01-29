@@ -10,6 +10,7 @@ using TK = TokenKind;
 // * ...
 
 // TODO(jh) Parenthesis & Block etc.
+// TODO(jh) Test for integer under/overflow?
 
 public class ScannerTests
 {
@@ -23,7 +24,7 @@ public class ScannerTests
 
     public ScannerTests(ITestOutputHelper outputHelper) => _outputHelper = outputHelper;
 
-    private void AssertTokensMeetExpectations(string query, TokenExpectation[] expectations)
+    private List<Token> Scan(string query)
     {
         var scanner = new Scanner(query);
         var tokens = new List<Token>();
@@ -34,6 +35,12 @@ public class ScannerTests
             if (token.Kind == TK.EndOfFile) break;
         }
 
+        return tokens;
+    }
+
+    private void AssertTokensMeetExpectations(string query, TokenExpectation[] expectations)
+    {
+        var tokens = Scan(query);
         Assert.Equal(tokens.Count(), expectations.Length);
 
         for (var i = 0; i < tokens.Count(); ++i)
@@ -87,23 +94,65 @@ public class ScannerTests
                 new(TK.Literal, "\"string\"", t => t.StringValue == "string"),
                 new(TK.EndOfFile, ""),
             });
+    }
 
+    [Fact]
+    public void Integers()
+    {
         AssertTokensMeetExpectations(
-            "1234",
+            "0",
             new TokenExpectation[]
             {
-                new(TK.Literal, "1234", t => t.IntValue == 1234),
+                new(TK.Literal, "0", t => t.IntValue == 0),
                 new(TK.EndOfFile, ""),
             });
 
         AssertTokensMeetExpectations(
-            "1.234",
+            "01",
             new TokenExpectation[]
             {
-                new(TK.Literal, "1.234", t => t.DoubleValue == 1.234),
+                new(TK.Literal, "01", t => t.IntValue == 1),
                 new(TK.EndOfFile, ""),
             });
 
+        AssertTokensMeetExpectations(
+            int.MaxValue.ToString(),
+            new TokenExpectation[]
+            {
+                new(TK.Literal, int.MaxValue.ToString(), t => t.IntValue == int.MaxValue),
+                new(TK.EndOfFile, ""),
+            });
+
+        var onePastMaxValue = int.MaxValue + 1L;
+        Assert.Throws<QueryCompilationException>(() => Scan(onePastMaxValue.ToString()));
+    }
+
+    [Fact]
+    public void FloatingPoint()
+    {
+        AssertTokensMeetExpectations(
+            "1.2",
+            new TokenExpectation[]
+            {
+                new(TK.Literal, "1.2", t => t.DoubleValue == 1.2),
+                new(TK.EndOfFile, ""),
+            });
+
+        var piString = "3.1415926535897932384626433832795028841971693993751058209";
+        AssertTokensMeetExpectations(
+            piString,
+            new TokenExpectation[]
+            {
+                new(TK.Literal, piString, t => t.DoubleValue == 3.141592653589793),
+                new(TK.EndOfFile, ""),
+            });
+
+        // TODO Special floating point numbers/exponents?
+    }
+
+    [Fact]
+    public void Boolean()
+    {
         AssertTokensMeetExpectations(
             "true",
             new TokenExpectation[]
@@ -112,6 +161,38 @@ public class ScannerTests
                 new(TK.EndOfFile, ""),
             });
 
+        AssertTokensMeetExpectations(
+            "false",
+            new TokenExpectation[]
+            {
+                new(TK.Literal, "false", t => t.BoolValue == false),
+                new(TK.EndOfFile, ""),
+            });
+    }
+
+    [Fact]
+    public void DateTime()
+    {
+        // TODO(jh)
+
+        AssertTokensMeetExpectations(
+            "2023-01-29 10:16:36.1234",
+            new TokenExpectation[]
+            {
+                new(TK.Literal, "2023-01-29 20:26:36.1234", t => t.DateTimeValue == new DateTime(2023, 1, 29, 20, 26, 36, 1234)),
+                new(TK.EndOfFile, ""),
+            });
+    }
+
+    [Fact]
+    public void TimeSpan()
+    {
+        // TODO(jh)
+    }
+
+    [Fact]
+    public void Mixed()
+    {
         AssertTokensMeetExpectations(
             $"""
             0 123   12345687 1.0 3.1
@@ -159,11 +240,11 @@ public class ScannerTests
     {
         var veryLongWord = "Pneumonoultramicroscopicsilicovolcanoconiosis";
         var input = $"""
-         This is a line that does not contain an error. 
+         This is a line that does not contain an error.
          This line is different and right over there is an error: xxx here is the error.
          This line also has no error.
          Very long word: {veryLongWord}.
-         """.Replace("\r", "");
+         """.ReplaceLineEndings("\n");
         var errorMessage = "Oh no, there was an error in your query!";
         var scanner = new Scanner(input);
 
