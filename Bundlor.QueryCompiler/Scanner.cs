@@ -165,20 +165,6 @@ internal class Scanner
         // Integer or floating point literal or just '.'?
         if (char.IsNumber(Current))
         {
-            var clone = Clone();
-            if (clone.TryParseTimeSpan() is { } timeSpan)
-            {
-                _position = clone._position;
-                return MakeToken(TokenKind.Literal, Cut(), new LiteralValue { TimeSpanValue = timeSpan });
-            }
-
-            clone = Clone();
-            if (clone.TryParseDateTime() is { } dateTime)
-            {
-                _position = clone._position;
-                return MakeToken(TokenKind.Literal, Cut(), new LiteralValue { DateTimeValue = dateTime });
-            }
-
             EatChar();
             while (char.IsNumber(Current))
                 EatChar();
@@ -258,148 +244,26 @@ internal class Scanner
             return MakeToken(operatorInfo.TokenKind, Cut());
         }
 
-        if (EatChar('(')) return MakeToken(TokenKind.ParenthesisOpen, "(");
-        if (EatChar(')')) return MakeToken(TokenKind.ParenthesisClose, ")");
-        if (EatChar('{')) return MakeToken(TokenKind.BlockOpen, "{");
-        if (EatChar('}')) return MakeToken(TokenKind.BlockClose, "}");
-        if (EatChar('*')) return MakeToken(TokenKind.Multiply, "*");
-        if (EatChar('/')) return MakeToken(TokenKind.Divide, "/");
-        if (EatChar('+')) return MakeToken(TokenKind.Plus, "+");
-        if (EatChar('-')) return MakeToken(TokenKind.Minus, "-");
-        if (EatChar('!')) return MakeToken(TokenKind.Not, "!");
-        if (EatChar('~')) return MakeToken(TokenKind.BitNot, "~");
-        if (EatChar('\0')) return MakeToken(TokenKind.EndOfFile, "");
+        var singleCharTokens = new[]
+        {
+            ('(', TokenKind.ParenthesisOpen),
+            (')', TokenKind.ParenthesisClose),
+            ('{', TokenKind.BlockOpen),
+            ('}', TokenKind.BlockClose),
+            ('*', TokenKind.Multiply),
+            ('/', TokenKind.Divide),
+            ('+', TokenKind.Plus),
+            ('-', TokenKind.Minus),
+            ('!', TokenKind.Not),
+            ('~', TokenKind.BitNot),
+            ('\0', TokenKind.EndOfFile),
+        };
+
+        foreach (var (c, tokenKind) in singleCharTokens)
+            if (EatChar(c)) return MakeToken(TokenKind.ParenthesisOpen, c.ToString());
 
         ThrowError(_currentTokenStart, _position, $"Unexpected character '{Current}'");
         throw new();
-    }
-
-    private int? ParseInt()
-    {
-        if (!char.IsNumber(Current))
-            return null;
-
-        var start = _position;
-        while (char.IsNumber(Current))
-            EatChar();
-
-        if (!int.TryParse(Cut(start).TrimStart('0'), out var value))
-        {
-            _position = start;
-            return null;
-        }
-
-        return value;
-    }
-
-    private TimeSpan? TryParseTimeSpan(bool allowDays = true)
-    {
-        // dd.HH:mm:ss.ffff
-        // Days, hours and milliseconds are optional
-
-        Debug.Assert(char.IsNumber(Current));
-
-        int? days = null;
-        Span<int?> colonSegments = stackalloc int?[3];
-        int numberOfColonSegments = 0;
-        int? milliseconds = null;
-
-        var done = false;
-        while (!done)  // TODO(jh) What about != '\0'?
-        {
-            if (ParseInt() is not { } value)
-            {
-                colonSegments[0] = null;
-                break;
-            }
-
-            switch (Current)
-            {
-                case '.':
-                    EatChar();
-
-                    // TODO(jh) Something is not right here!
-
-                    if (numberOfColonSegments == 0)
-                    {
-                    }
-
-                    if (days == null || !allowDays)
-                    {
-                        if (numberOfColonSegments != 0)
-                        {
-                            colonSegments[0] = null;
-                            done = true;
-                        }
-
-                        days = value;
-                        break;
-                    }
-
-                    // Milliseconds only make sense if there were at least minutes and seconds
-                    if (numberOfColonSegments < 2)
-                    {
-                        done = true;
-                        break;
-                    }
-
-                    milliseconds = value;
-                    done = true;
-                    break;
-
-                case ':':
-                    if (numberOfColonSegments == 3)
-                    {
-                        done = true;
-                        break;
-                    }
-
-                    colonSegments[numberOfColonSegments++] = value;
-                    EatChar();
-                    break;
-
-                default:
-                    done = true;
-                    break;
-            }
-        }
-
-        return colonSegments switch
-        {
-            [{ } hours, { } minutes, { } seconds] =>
-                new TimeSpan(days ?? 0, hours, minutes, seconds, milliseconds ?? 0),
-            [{ } minutes, { } seconds, null] =>
-                new TimeSpan(days ?? 0, 0, minutes, seconds, milliseconds ?? 0),
-            _ => (TimeSpan?)null,
-        };
-    }
-
-    private DateTime? TryParseDateTime()
-    {
-        // yyyy-MM-dd HH:mm:ss.fff
-        // Time is optional and if given, seconds and milliseconds are optional
-
-        var dateScanner = Clone();
-        if (
-            dateScanner.ParseInt() is not { } year  || !dateScanner.EatChar('-') ||
-            dateScanner.ParseInt() is not { } month || !dateScanner.EatChar('-') ||
-            dateScanner.ParseInt() is not { } day)
-            return null;
-
-        var result = new DateTime(year, month, day);
-
-        var timeOfDayScanner = dateScanner.Clone();
-        if (timeOfDayScanner.EatChar(' ') && timeOfDayScanner.TryParseTimeSpan(allowDays: false) is { } timeOfDay)
-        {
-            result += timeOfDay;
-            _position = timeOfDayScanner._position;
-        }
-        else
-        {
-            _position = dateScanner._position;
-        }
-
-        return result;
     }
 
     // TODO(jh) text could be replaced by doing Cut() here, right?

@@ -122,6 +122,23 @@ internal class Parser
                     return Expression.Constant(DateTime.Now);
                 }
 
+                // We handle method calls here instead of in ParseSuffixExpression
+                // since we need the identifier to find the method
+                if (_scanner.TryPop(TokenKind.ParenthesisOpen) != null)
+                {
+                    var argument = ParseExpression();
+                    _scanner.Require(TokenKind.ParenthesisClose);
+
+                    var method = typeof(Functions).GetMethod(token.Text);
+                    if (method == null)
+                    {
+                        _scanner.ThrowError(token, $"Method '{token.Text}' is not defined");
+                        throw new();
+                    }
+
+                    return ParseSuffixExpression(Expression.Call(null, method, argument));
+                }
+
                 var memberInfo = FindMemberInfo(_scanner, _context.Members, token);
                 return Expression.MakeMemberAccess(_context.InputParameter, memberInfo);
 
