@@ -41,6 +41,7 @@ internal enum TokenKind
     Identifier,
     IteratorVariable,
     Dot,
+    Comma,
     NestedQueryOperator,
     Literal,
     ParenthesisOpen,
@@ -80,20 +81,6 @@ internal readonly struct LiteralValue
         init => _boolValue = value;
     }
 
-    private readonly TimeSpan? _timeSpanValue;
-    public TimeSpan? TimeSpanValue
-    {
-        get => _timeSpanValue ?? throw new InvalidOperationException();
-        init => _timeSpanValue = value;
-    }
-
-    private readonly DateTime? _dateTimeValue;
-    public DateTime? DateTimeValue
-    {
-        get => _dateTimeValue ?? throw new InvalidOperationException();
-        init => _dateTimeValue = value;
-    }
-
     public object Opaque
     {
         get
@@ -102,8 +89,6 @@ internal readonly struct LiteralValue
             if (_intValue != null) return _intValue;
             if (_doubleValue != null) return _doubleValue;
             if (_boolValue != null) return _boolValue;
-            if (_timeSpanValue != null) return _timeSpanValue;
-            if (_dateTimeValue != null) return _dateTimeValue;
             throw new InvalidOperationException();
         }
     }
@@ -128,8 +113,6 @@ internal readonly struct Token
     public int IntValue => LiteralValue!.Value.IntValue!.Value;
     public double DoubleValue => LiteralValue!.Value.DoubleValue!.Value;
     public bool BoolValue => LiteralValue!.Value.BoolValue!.Value;
-    public TimeSpan TimeSpanValue => LiteralValue!.Value.TimeSpanValue!.Value;
-    public DateTime DateTimeValue => LiteralValue!.Value.DateTimeValue!.Value;
 
     public override string ToString() => Text;
 }
@@ -148,9 +131,6 @@ internal record class UnaryOperatorInfo(
 
 internal static class TokenConstants
 {
-    // TODO(jh) What do we need the TokenKind for in the BinaryOperatorInfo???
-    //  Could we not just make the token kind = 'operator'?
-
     // NOTE(jh) https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/#operator-precedence
     // NOTE(jh) Must be sorted by operator length so the scanner does not early-out when trying to match the text.
     public static readonly BinaryOperatorInfo[] BinaryOperators = new BinaryOperatorInfo[]
@@ -173,7 +153,7 @@ internal static class TokenConstants
         new("==", TokenKind.Equal, ExpressionType.Equal, null, 60),
         new("!=", TokenKind.NotEqual, ExpressionType.NotEqual, null, 60),
 
-        // TODO(jh) I really want to make text-based alternates for this (a like "*.dll" or
+        // TODO(jh) Maybe it would be cool to have text-based alternates for this (a like "*.dll" or
         // a matches "\w+\s\w")
         new("=?", TokenKind.Like, null, GetBinaryMethod("Like"), 60),
         new("!?", TokenKind.NotLike, null, GetBinaryMethod("NotLike"), 60),

@@ -4,20 +4,6 @@ namespace Bundlor.QueryCompiler;
 
 internal static class SpecialBinaryOperatorFunctions
 {
-    /*
-    public static bool Older(DateTime left, TimeSpan right)
-    {
-        // TODO(jh)
-        return true;
-    }
-
-    public static bool Newer(DateTime left, TimeSpan right)
-    {
-        // TODO(jh)
-        return true;
-    }
-    */
-
     public static bool Like(string left, string right)
     {
         left ??= "";
@@ -58,14 +44,6 @@ internal static class SpecialBinaryOperatorFunctions
     }
 
     public static bool NotLike(string left, string right) => !Like(left, right);
-
-    /*
-    public static bool Ilike(string left, string right)
-    {
-        // TODO(jh)
-        return true;
-    }
-    */
 
     public static bool MatchesRegex(string left, string right)
     {

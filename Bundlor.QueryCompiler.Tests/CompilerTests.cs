@@ -2,9 +2,6 @@
 
 namespace Bundlor.QueryCompiler.Tests;
 
-// TODO(jh) When use [Theory] and when use [Fact]?
-// It seems to me that facts are generally easier to write and read...
-
 public class CompilerTests
 {
     private record BooleanTriple(bool A, bool B, bool C = false);
@@ -42,6 +39,7 @@ public class CompilerTests
         }
     }
 
+    // TODO(jh) Throw out the truth table tests - they are testing the C# runtime...
     [Fact]
     public void Conjunction()
     {
@@ -320,5 +318,7 @@ public class CompilerTests
             @now - lastcheck > 5:00:00:00 &&
             list all { number > $$.loginatt }
             """);
+
+        // TODO(jh)
     }
 }

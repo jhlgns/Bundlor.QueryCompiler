@@ -371,6 +371,67 @@ public class ParserTests
         Assert.True(isCorrect);
     }
 
+    [Fact]
+    public void ParseDateTime()
+    {
+        var expression = Simplify(CompileFilterExpression<SomethingWithDateTime>("""@now == datetime("2023-02-16 18:59:59")"""));
+        var isCorrect = expression is BinaryExpression
+        {
+            Right: MethodCallExpression
+            {
+                Method: { Name: "DateTime" } method,
+                Type.Name: "DateTime",
+            },
+        } && method.GetParameters().Length == 1;
+        Assert.True(isCorrect);
+    }
+
+    [Fact]
+    public void ParseDateTimeWithFormat()
+    {
+        var expression = Simplify(
+            CompileFilterExpression<SomethingWithDateTime>("""@now == datetime("2023-02-16 18:59:59", "yyyy-MM-dd HH:mm:ss")"""));
+        var isCorrect = expression is BinaryExpression
+        {
+            Right: MethodCallExpression
+            {
+                Method: { Name: "DateTime" } method,
+                Type.Name: "DateTime",
+            },
+        } && method.GetParameters().Length == 2;
+        Assert.True(isCorrect);
+    }
+
+    [Fact]
+    public void ParseTimeSpan()
+    {
+        var expression = Simplify(CompileFilterExpression<SomethingWithDateTime>("""@now-@now == timespan("1.18:59:59.1234")"""));
+        var isCorrect = expression is BinaryExpression
+        {
+            Right: MethodCallExpression
+            {
+                Method: { Name: "TimeSpan" } method,
+                Type.Name: "TimeSpan",
+            },
+        } && method.GetParameters().Length == 1;
+        Assert.True(isCorrect);
+    }
+
+    [Fact]
+    public void ParseTimeSpanWithFormat()
+    {
+        var expression = Simplify(CompileFilterExpression<SomethingWithDateTime>("""@now-@now == timespan("1.18:59:59.1234", "dddd.HH:mm:ss.ffff")"""));
+        var isCorrect = expression is BinaryExpression
+        {
+            Right: MethodCallExpression
+            {
+                Method: { Name: "TimeSpan" } method,
+                Type.Name: "TimeSpan",
+            },
+        } && method.GetParameters().Length == 2;
+        Assert.True(isCorrect);
+    }
+
     [Theory]
     [InlineData("(a != b")]
     [InlineData("a && b)")]

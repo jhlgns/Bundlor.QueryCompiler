@@ -126,17 +126,26 @@ internal class Parser
                 // since we need the identifier to find the method
                 if (_scanner.TryPop(TokenKind.ParenthesisOpen) != null)
                 {
-                    var argument = ParseExpression();
+                    var arguments = new List<Expression>();
+
+                    do arguments.Add(ParseExpression());
+                    while (_scanner.TryPop(TokenKind.Comma) != null);
+
                     _scanner.Require(TokenKind.ParenthesisClose);
 
-                    var method = typeof(Functions).GetMethod(token.Text);
+                    var method = typeof(Functions)
+                        .GetMethods()
+                        .Where(x =>
+                            x.Name.Equals(token.Text, StringComparison.OrdinalIgnoreCase) &&
+                            x.GetParameters().Length == arguments.Count())
+                        .SingleOrDefault();
                     if (method == null)
                     {
                         _scanner.ThrowError(token, $"Method '{token.Text}' is not defined");
                         throw new();
                     }
 
-                    return ParseSuffixExpression(Expression.Call(null, method, argument));
+                    return ParseSuffixExpression(Expression.Call(null, method, arguments));
                 }
 
                 var memberInfo = FindMemberInfo(_scanner, _context.Members, token);

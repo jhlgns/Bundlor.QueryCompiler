@@ -4,13 +4,21 @@ public static class Functions
 {
     public static DateTime DateTime(string value)
     {
-        // TODO
-        return System.DateTime.Now;
+        return System.DateTime.Parse(value);
+    }
+
+    public static DateTime DateTime(string value, string format)
+    {
+        return System.DateTime.ParseExact(value, format, null);
     }
 
     public static TimeSpan TimeSpan(string value)
     {
-        // TODO
-        return System.TimeSpan.FromMinutes(3);
+        return System.TimeSpan.Parse(value);
+    }
+
+    public static TimeSpan TimeSpan(string value, string format)
+    {
+        return System.TimeSpan.ParseExact(value, format, null);
     }
 }

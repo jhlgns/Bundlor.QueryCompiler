@@ -16,7 +16,7 @@ public class QueryCompilationException : Exception
 
 internal class Scanner
 {
-    public Scanner(string input) => _input = input.ReplaceLineEndings("\n");
+    public Scanner(string input) => _input = input.ReplaceLineEndings("\n").Trim();
 
     private readonly string _input;
     private int _position;
@@ -90,7 +90,6 @@ internal class Scanner
         {
             // Extract line that encloses the specified position
             var lineStart = start;
-            // TODO(jh) What if _input empty?
             while (lineStart > 1 && _input[lineStart - 1] != '\n')
                 --lineStart;
 
@@ -246,6 +245,7 @@ internal class Scanner
 
         var singleCharTokens = new[]
         {
+            (',', TokenKind.Comma),
             ('(', TokenKind.ParenthesisOpen),
             (')', TokenKind.ParenthesisClose),
             ('{', TokenKind.BlockOpen),
@@ -260,13 +260,12 @@ internal class Scanner
         };
 
         foreach (var (c, tokenKind) in singleCharTokens)
-            if (EatChar(c)) return MakeToken(TokenKind.ParenthesisOpen, c.ToString());
+            if (EatChar(c)) return MakeToken(tokenKind, c == '\0' ? "" : c.ToString());
 
         ThrowError(_currentTokenStart, _position, $"Unexpected character '{Current}'");
         throw new();
     }
 
-    // TODO(jh) text could be replaced by doing Cut() here, right?
     private Token MakeToken(TokenKind kind, string text, LiteralValue? literalValue = null) =>
         new Token(_currentTokenStart, kind, text, literalValue);
 }

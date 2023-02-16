@@ -9,7 +9,7 @@ using TK = TokenKind;
 // * Unexpected character
 // * ...
 
-// TODO(jh) Parenthesis & Block etc.
+// TODO(jh) Test parenthesis & blocks etc.
 // TODO(jh) Test for integer under/overflow?
 
 public class ScannerTests
@@ -168,26 +168,6 @@ public class ScannerTests
                 new(TK.Literal, "false", t => t.BoolValue == false),
                 new(TK.EndOfFile, ""),
             });
-    }
-
-    [Fact]
-    public void DateTime()
-    {
-        // TODO(jh)
-
-        AssertTokensMeetExpectations(
-            "2023-01-29 10:16:36.1234",
-            new TokenExpectation[]
-            {
-                new(TK.Literal, "2023-01-29 20:26:36.1234", t => t.DateTimeValue == new DateTime(2023, 1, 29, 20, 26, 36, 1234)),
-                new(TK.EndOfFile, ""),
-            });
-    }
-
-    [Fact]
-    public void TimeSpan()
-    {
-        // TODO(jh)
     }
 
     [Fact]
