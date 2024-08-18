@@ -1,4 +1,4 @@
-C# LINQ-Expression based filter language. **Early prototype**.
+# C# LINQ-Expression based filter language. **Early prototype**.
 
 Written for easy usage and integration.
 

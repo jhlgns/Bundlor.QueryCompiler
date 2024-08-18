@@ -25,7 +25,6 @@ internal class Scanner
     private char this[int index] => index < _input.Length ? _input[index] : '\0';
     private char Current => this[_position];
     private void EatChar() => ++_position;
-    private void UnEatChar() => --_position;
     private bool EatChar(char c)
     {
         if (Current == c)
